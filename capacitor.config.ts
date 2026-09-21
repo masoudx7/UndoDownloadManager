@@ -1,0 +1,26 @@
+import type { CapacitorConfig } from '@capacitor/cli';
+
+const config: CapacitorConfig = {
+  appId: 'com.yourcompany.appname',
+  appName: 'نام برنامه جدید',
+  webDir: 'dist',
+  server: {
+    androidScheme: 'https',
+    cleartext: true
+  },
+  plugins: {
+    SplashScreen: {
+      launchShowDuration: 2000,
+      launchAutoHide: true,
+      backgroundColor: "#ffffff",
+      showSpinner: true,
+      spinnerColor: "#2563eb"
+    },
+    StatusBar: {
+      style: "DARK",
+      backgroundColor: "#1e3a8a"
+    }
+  }
+};
+
+export default config;
