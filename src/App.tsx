@@ -1,608 +1,427 @@
-import React, { useState, useEffect } from "react";
-import { v4 as uuidv4 } from "uuid";
-import { Capacitor } from "@capacitor/core";
-import { SplashScreen } from "@capacitor/splash-screen";
-import { StatusBar, Style } from "@capacitor/status-bar";
-import { App as CapApp } from "@capacitor/app";
-import { Header } from "./components/Header";
-import { UploadZone } from "./components/UploadZone";
-import { AnalysisResult } from "./components/AnalysisResult";
-import { LegalAssistantChat } from "./components/LegalAssistantChat";
-import { HistoryDrawer } from "./components/HistoryDrawer";
-import { PrivacyNoticeModal } from "./components/PrivacyNoticeModal";
-import { ClauseInquiryModal } from "./components/ClauseInquiryModal";
-import { DefenseDraftModal } from "./components/DefenseDraftModal";
-import { CoinPurchaseModal } from "./components/CoinPurchaseModal";
-import {
-  JudicialNoticeAnalysis,
-  AnalysisHistoryItem,
-  SectionQueryContext,
-} from "./types";
-import { SampleNotice } from "./sampleData";
-import { getApiUrl } from "./utils/apiHelper";
-import { Scale, AlertCircle, ArrowUp, RefreshCcw, Crown, Sparkles, X } from "lucide-react";
+import React, { useState, useEffect } from 'react';
+import { v4 as uuidv4 } from 'uuid';
+import { DownloadItem, DownloadCategory, DownloadStatus, SortOption, UndoNotification, ScheduleSettings } from './types';
+import { initialDownloads } from './data/initialDownloads';
+import { Header } from './components/Header';
+import { CategoryTabs } from './components/CategoryTabs';
+import { SearchBar } from './components/SearchBar';
+import { DownloadCard } from './components/DownloadCard';
+import { AddDownloadModal } from './components/AddDownloadModal';
+import { UndoSnackbar } from './components/UndoSnackbar';
+import { SchedulePanel } from './components/SchedulePanel';
+import { Download, Sparkles, FolderOpen, Clock, ListFilter, Pause, Play, CheckCheck, Trash2 } from 'lucide-react';
+import { formatBytes } from './utils/formatters';
 
-const HISTORY_STORAGE_KEY = "judicial_notice_analysis_history";
-const DEVICE_ID_KEY = "eblaghyar_device_id";
+const STORAGE_KEY = 'undo_downloader_items_v1';
+const DARK_MODE_KEY = 'undo_downloader_dark_mode';
+const SCHEDULE_KEY = 'undo_downloader_schedule_v1';
 
 export default function App() {
-  const [currentAnalysis, setCurrentAnalysis] = useState<JudicialNoticeAnalysis | null>(null);
-  const [currentFileName, setCurrentFileName] = useState<string>("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [deviceId, setDeviceId] = useState<string>("");
-  const [freeTokens, setFreeTokens] = useState<number>(2);
-  const [isPremium, setIsPremium] = useState<boolean>(false);
-  const [isCoinModalOpen, setIsCoinModalOpen] = useState<boolean>(false);
-
-  const fetchDeviceStatus = async (devId: string) => {
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
     try {
-      const res = await fetch(getApiUrl("/api/device-status"), {
-        headers: {
-          "x-device-id": devId,
-        },
-      });
-      const data = await res.json().catch(() => null);
-      if (data && data.success) {
-        if (typeof data.free_tokens === "number") setFreeTokens(data.free_tokens);
-        if (typeof data.is_premium === "boolean") setIsPremium(data.is_premium);
-      }
-    } catch (e) {
-      console.warn("Failed to fetch device status:", e);
+      const saved = localStorage.getItem(DARK_MODE_KEY);
+      if (saved !== null) return JSON.parse(saved);
+      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    } catch {
+      return false;
     }
-  };
-
-  useEffect(() => {
-    if (deviceId) {
-      fetchDeviceStatus(deviceId);
-    }
-  }, [deviceId]);
-  const [showPremiumPrompt, setShowPremiumPrompt] = useState<boolean>(false);
-  const [dismissedLowTokenWarning, setDismissedLowTokenWarning] = useState<boolean>(false);
-  const [lastAnalyzePayload, setLastAnalyzePayload] = useState<{
-    fileBase64: string | null;
-    mimeType: string | null;
-    rawText: string | null;
-    fileName: string;
-  } | null>(null);
-  const [history, setHistory] = useState<AnalysisHistoryItem[]>([]);
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [isPrivacyOpen, setIsPrivacyOpen] = useState(false);
-  const [isDefenseDraftOpen, setIsDefenseDraftOpen] = useState(false);
-  const [showScrollTop, setShowScrollTop] = useState(false);
-
-  // Section query & clause modal state
-  const [activeSectionContext, setActiveSectionContext] = useState<SectionQueryContext | null>(null);
-  const [clauseModalState, setClauseModalState] = useState<{
-    isOpen: boolean;
-    initialClause: string;
-    initialQuestion: string;
-    sectionTitle: string;
-  }>({
-    isOpen: false,
-    initialClause: "",
-    initialQuestion: "",
-    sectionTitle: "",
   });
 
-  // 1. Device-based Anonymous Auth Initialization (UUID)
-  useEffect(() => {
+  const [downloads, setDownloads] = useState<DownloadItem[]>(() => {
     try {
-      let storedDeviceId = localStorage.getItem(DEVICE_ID_KEY);
-      if (!storedDeviceId) {
-        storedDeviceId = uuidv4();
-        localStorage.setItem(DEVICE_ID_KEY, storedDeviceId);
-      }
-      setDeviceId(storedDeviceId);
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
     } catch (e) {
-      console.error("Failed to access localStorage for deviceId:", e);
-      const generated = uuidv4();
-      setDeviceId(generated);
+      console.error('Failed to load downloads from localStorage', e);
     }
-  }, []);
+    return initialDownloads;
+  });
 
-  // 1.1 Capacitor native platform initialization (StatusBar, SplashScreen, BackButton)
-  useEffect(() => {
-    let backListener: any = null;
-    if (Capacitor.isNativePlatform()) {
-      SplashScreen.hide().catch(() => {});
-      StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
-      StatusBar.setBackgroundColor({ color: "#1e3a8a" }).catch(() => {});
-
-      CapApp.addListener("backButton", () => {
-        if (isHistoryOpen) {
-          setIsHistoryOpen(false);
-        } else if (isPrivacyOpen) {
-          setIsPrivacyOpen(false);
-        } else if (isDefenseDraftOpen) {
-          setIsDefenseDraftOpen(false);
-        } else if (clauseModalState.isOpen) {
-          setClauseModalState((prev) => ({ ...prev, isOpen: false }));
-        } else if (currentAnalysis) {
-          if (window.confirm("آیا می‌خواهید از تحلیل فعلی خارج شوید؟")) {
-            setCurrentAnalysis(null);
-            setCurrentFileName("");
-          }
-        } else {
-          if (window.confirm("آیا می‌خواهید از برنامه خارج شوید؟")) {
-            CapApp.exitApp();
-          }
-        }
-      }).then((listener) => {
-        backListener = listener;
-      }).catch(() => {});
-
-      return () => {
-        if (backListener && typeof backListener.remove === "function") {
-          backListener.remove();
-        }
-      };
-    }
-  }, [isHistoryOpen, isPrivacyOpen, isDefenseDraftOpen, clauseModalState.isOpen, currentAnalysis]);
-
-  // 2. Load analysis history on mount
-  useEffect(() => {
+  const [scheduleSettings, setScheduleSettings] = useState<ScheduleSettings>(() => {
     try {
-      const saved = localStorage.getItem(HISTORY_STORAGE_KEY);
-      if (saved) {
-        setHistory(JSON.parse(saved));
-      }
-    } catch (e) {
-      console.error("Failed to load analysis history:", e);
-    }
-  }, []);
-
-  // 3. Handle scroll to top visibility
-  useEffect(() => {
-    const handleScroll = () => {
-      setShowScrollTop(window.scrollY > 300);
+      const saved = localStorage.getItem(SCHEDULE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return {
+      enabled: false,
+      startTime: '02:00',
+      endTime: '07:00',
     };
-    window.addEventListener("scroll", handleScroll);
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
+  });
 
-  const saveToHistory = (analysis: JudicialNoticeAnalysis, fileName: string) => {
-    const newItem: AnalysisHistoryItem = {
-      id: Date.now().toString(),
-      date: new Date().toLocaleDateString("fa-IR", {
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-      }),
-      fileName,
-      summary: analysis.summaryInSimpleWords,
-      authority: analysis.caseDetails?.issuingAuthority || "مرجع قضایی",
-      urgency: analysis.urgencyLevel,
-      analysis,
-    };
+  const [activeMainTab, setActiveMainTab] = useState<'active' | 'completed' | 'schedule'>('active');
+  const [selectedCategory, setSelectedCategory] = useState<DownloadCategory>('all');
+  const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
+  const [undoNotification, setUndoNotification] = useState<UndoNotification | null>(null);
+  const [isCurrentlyInScheduleWindow, setIsCurrentlyInScheduleWindow] = useState<boolean>(false);
 
-    const updated = [newItem, ...history.filter((h) => h.id !== newItem.id)].slice(0, 20);
-    setHistory(updated);
+  // Sync dark mode class with HTML document
+  useEffect(() => {
     try {
-      localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(updated));
-    } catch (e) {
-      console.error("Failed to persist history:", e);
+      localStorage.setItem(DARK_MODE_KEY, JSON.stringify(darkMode));
+    } catch (e) {}
+
+    const root = document.documentElement;
+    if (darkMode) {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
     }
-  };
+  }, [darkMode]);
 
-  const handleAnalyze = async (
-    fileBase64: string | null,
-    mimeType: string | null,
-    rawText: string | null,
-    fileName: string
-  ) => {
-    setIsLoading(true);
-    setError(null);
-    setShowPremiumPrompt(false);
-    setCurrentFileName(fileName);
-    setLastAnalyzePayload({ fileBase64, mimeType, rawText, fileName });
-
+  // Persist downloads to localStorage
+  useEffect(() => {
     try {
-      // اطمینان از وجود شناسه دستگاه
-      let currentDeviceId = deviceId;
-      if (!currentDeviceId) {
-        try {
-          currentDeviceId = localStorage.getItem(DEVICE_ID_KEY) || uuidv4();
-          localStorage.setItem(DEVICE_ID_KEY, currentDeviceId);
-        } catch {
-          currentDeviceId = uuidv4();
-        }
-        setDeviceId(currentDeviceId);
-      }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(downloads));
+    } catch (e) {
+      console.error('Failed to save downloads', e);
+    }
+  }, [downloads]);
 
-      // ارسال درخواست به همراه هدر x-device-id
-      const res = await fetch(getApiUrl("/api/analyze"), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-device-id": currentDeviceId,
-        },
-        body: JSON.stringify({ fileBase64, mimeType, rawText }),
-      });
+  // Persist schedule to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(SCHEDULE_KEY, JSON.stringify(scheduleSettings));
+    } catch (e) {}
+  }, [scheduleSettings]);
 
-      const json = await res.json().catch(() => null);
-
-      // بررسی وضعیت ۴۰۳ و اتمام توکن‌های رایگان (LIMIT_REACHED)
-      if (res.status === 403 && json?.error === "LIMIT_REACHED") {
-        setShowPremiumPrompt(true);
-        setError(null);
+  // Schedule time window checker & auto start/stop
+  useEffect(() => {
+    const checkWindow = () => {
+      if (!scheduleSettings.enabled) {
+        setIsCurrentlyInScheduleWindow(false);
         return;
       }
+      const now = new Date();
+      const currentH = now.getHours().toString().padStart(2, '0');
+      const currentM = now.getMinutes().toString().padStart(2, '0');
+      const currentTimeStr = `${currentH}:${currentM}`;
 
-      if (!res.ok || !json?.success || !json?.data) {
-        throw new Error(json?.message || json?.error || `خطا در تحلیل ابلاغیه قضایی (${res.status})`);
+      const { startTime, endTime } = scheduleSettings;
+      let inWindow = false;
+      if (startTime <= endTime) {
+        inWindow = currentTimeStr >= startTime && currentTimeStr <= endTime;
+      } else {
+        inWindow = currentTimeStr >= startTime || currentTimeStr <= endTime;
       }
 
-      const analysisData: JudicialNoticeAnalysis = json.data;
-      setCurrentAnalysis(analysisData);
-      saveToHistory(analysisData, fileName);
-      setLastAnalyzePayload(null);
-      await fetchDeviceStatus(currentDeviceId);
+      setIsCurrentlyInScheduleWindow(inWindow);
 
-      // انتقال به ابتدای صفحه جهت مشاهده تحلیل
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    } catch (err: any) {
-      console.error("Analyze error:", err);
-      setError(err.message || "متأسفانه در تحلیل ابلاغیه خطایی رخ داد. لطفاً مجدداً امتحان کنید.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleRetryAnalyze = () => {
-    if (lastAnalyzePayload) {
-      handleAnalyze(
-        lastAnalyzePayload.fileBase64,
-        lastAnalyzePayload.mimeType,
-        lastAnalyzePayload.rawText,
-        lastAnalyzePayload.fileName
-      );
-    }
-  };
-
-  const handleBuyPremium = () => {
-    setIsCoinModalOpen(true);
-  };
-
-  const handleSelectSample = (sample: SampleNotice) => {
-    setError(null);
-    setShowPremiumPrompt(false);
-    setCurrentFileName(sample.name);
-    setCurrentAnalysis(sample.precomputedAnalysis);
-    saveToHistory(sample.precomputedAnalysis, sample.name);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  const handleReset = () => {
-    setCurrentAnalysis(null);
-    setCurrentFileName("");
-    setError(null);
-    setShowPremiumPrompt(false);
-    setActiveSectionContext(null);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  const handleSelectHistoryItem = (item: AnalysisHistoryItem) => {
-    setCurrentAnalysis(item.analysis);
-    setCurrentFileName(item.fileName);
-    setShowPremiumPrompt(false);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  const handleClearHistory = () => {
-    const confirmed = window.confirm(
-      "آیا مطمئن هستید که می‌خواهید تمام تاریخچه تحلیل‌های خود را پاک کنید؟\n\n(توجه: موجودی سکه و اشتراک پرمیوم شما دست‌نخورده باقی خواهد ماند و این عمل فقط سوابق ذخیره‌شده روی مرورگر را پاک می‌کند.)"
-    );
-    if (confirmed) {
-      setHistory([]);
-      try {
-        localStorage.removeItem(HISTORY_STORAGE_KEY);
-      } catch (e) {
-        console.error(e);
+      if (scheduleSettings.enabled) {
+        setDownloads((prev) =>
+          prev.map((item) => {
+            if (inWindow) {
+              if (item.status === 'paused' && (item.eta.includes('متوقف') || item.eta.includes('زمان‌بند'))) {
+                return { ...item, status: 'downloading', speed: 2097152, eta: 'در حال دانلود (تایمر خودکار)' };
+              }
+            } else {
+              if (item.status === 'downloading') {
+                return { ...item, status: 'paused', speed: 0, eta: 'متوقف‌شده توسط زمان‌بند' };
+              }
+            }
+            return item;
+          })
+        );
       }
-    }
-  };
+    };
 
-  const handleDeleteHistoryItem = (id: string) => {
-    const updated = history.filter((item) => item.id !== id);
-    setHistory(updated);
-    try {
-      localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(updated));
-    } catch (e) {
-      console.error(e);
-    }
-  };
+    checkWindow();
+    const timer = setInterval(checkWindow, 15000);
+    return () => clearInterval(timer);
+  }, [scheduleSettings.enabled, scheduleSettings.startTime, scheduleSettings.endTime]);
 
-  const scrollToChat = () => {
-    const chatElement = document.getElementById("legal-chat-section");
-    if (chatElement) {
-      chatElement.scrollIntoView({ behavior: "smooth" });
-    }
-  };
+  // Real-time download simulation loop
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setDownloads((prev) => {
+        const updated = prev.map((item) => {
+          if (item.status !== 'downloading') return item;
 
-  const handleAskSectionQuestion = (
-    question: string,
-    sectionContext: { sectionTitle: string; sectionSnippet: string }
-  ) => {
-    setActiveSectionContext({
-      sectionTitle: sectionContext.sectionTitle,
-      sectionSnippet: sectionContext.sectionSnippet,
-      suggestedPrompt: question,
-    });
-    scrollToChat();
-  };
+          const increment = Math.floor(Math.random() * 2097152) + 1048576; // 1MB to 3MB per tick
+          const newDownloaded = Math.min(item.fileSize, item.downloadedSize + increment);
+          const newProgress = Math.floor((newDownloaded / item.fileSize) * 100);
 
-  const handleOpenClauseModal = (
-    initialClause = "",
-    initialQuestion = "",
-    sectionTitle = "بند یا عبارت خاص از ابلاغیه"
-  ) => {
-    setClauseModalState({
-      isOpen: true,
-      initialClause,
-      initialQuestion,
-      sectionTitle,
-    });
-  };
+          if (newDownloaded >= item.fileSize) {
+            return {
+              ...item,
+              downloadedSize: item.fileSize,
+              progress: 100,
+              speed: 0,
+              status: 'completed' as DownloadStatus,
+              eta: 'تکمیل شده',
+            };
+          }
 
-  const handleSendClauseToMainChat = (
-    query: string,
-    sectionContext?: { sectionTitle: string; sectionSnippet: string }
-  ) => {
-    if (sectionContext) {
-      setActiveSectionContext({
-        sectionTitle: sectionContext.sectionTitle,
-        sectionSnippet: sectionContext.sectionSnippet,
-        suggestedPrompt: query,
+          const remainingBytes = item.fileSize - newDownloaded;
+          const secondsLeft = Math.ceil(remainingBytes / item.speed);
+          const etaText = secondsLeft < 60 ? `${secondsLeft} ثانیه مانده` : `${Math.ceil(secondsLeft / 60)} دقیقه مانده`;
+
+          return {
+            ...item,
+            downloadedSize: newDownloaded,
+            progress: newProgress,
+            eta: etaText,
+          };
+        });
+
+        return updated;
       });
-    }
-    scrollToChat();
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  // Handlers
+  const handlePauseResume = (id: string) => {
+    setDownloads((prev) =>
+      prev.map((item) => {
+        if (item.id !== id) return item;
+        if (item.status === 'downloading') {
+          return { ...item, status: 'paused', speed: 0, eta: 'متوقف شده' };
+        }
+        if (item.status === 'paused' || item.status === 'error') {
+          return { ...item, status: 'downloading', speed: 2097152, eta: 'در حال محاسبه...' };
+        }
+        return item;
+      })
+    );
   };
+
+  const handleRetry = (id: string) => {
+    setDownloads((prev) =>
+      prev.map((item) => {
+        if (item.id !== id) return item;
+        return { ...item, status: 'downloading', speed: 2097152, eta: 'در حال شروع...' };
+      })
+    );
+  };
+
+  const handleCancelDelete = (itemToCancel: DownloadItem) => {
+    setDownloads((prev) => prev.filter((d) => d.id !== itemToCancel.id));
+    setUndoNotification({
+      id: uuidv4(),
+      message: `فایل ${itemToCancel.name} لغو و حذف شد`,
+      item: itemToCancel,
+      timestamp: Date.now(),
+    });
+  };
+
+  const handleUndo = (itemToRestore: DownloadItem) => {
+    setDownloads((prev) => [itemToRestore, ...prev]);
+    setUndoNotification(null);
+  };
+
+  const handleAddDownload = (url: string, name: string, category: DownloadCategory, fileSize: number) => {
+    const newItem: DownloadItem = {
+      id: uuidv4(),
+      name,
+      url,
+      category,
+      fileSize,
+      downloadedSize: 0,
+      progress: 0,
+      speed: 3145728, // 3MB/s
+      status: scheduleSettings.enabled && !isCurrentlyInScheduleWindow ? 'paused' : 'downloading',
+      createdAt: new Date().toLocaleDateString('fa-IR', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      eta: scheduleSettings.enabled && !isCurrentlyInScheduleWindow ? 'متوقف‌شده توسط زمان‌بند' : 'محاسبه زمان...',
+    };
+
+    setDownloads((prev) => [newItem, ...prev]);
+  };
+
+  const handleClearCompleted = () => {
+    setDownloads((prev) => prev.filter((d) => d.status !== 'completed'));
+  };
+
+  // Category counts
+  const counts: Record<DownloadCategory, number> = {
+    all: downloads.length,
+    video: downloads.filter((d) => d.category === 'video').length,
+    music: downloads.filter((d) => d.category === 'music').length,
+    document: downloads.filter((d) => d.category === 'document').length,
+    software: downloads.filter((d) => d.category === 'software').length,
+    archive: downloads.filter((d) => d.category === 'archive').length,
+    other: downloads.filter((d) => d.category === 'other').length,
+  };
+
+  const activeCount = downloads.filter((d) => d.status === 'downloading').length;
+  const completedCount = downloads.filter((d) => d.status === 'completed').length;
+  const totalStorageUsedBytes = downloads
+    .filter((d) => d.status === 'completed')
+    .reduce((acc, curr) => acc + curr.fileSize, 0);
+
+  // Filter & Sort
+  const filteredDownloads = downloads.filter((item) => {
+    const isCompletedTab = activeMainTab === 'completed';
+    const matchesTabStatus = isCompletedTab ? item.status === 'completed' : item.status !== 'completed';
+    const matchesCategory = selectedCategory === 'all' || item.category === selectedCategory;
+    return matchesTabStatus && matchesCategory;
+  });
+
+  const sortedDownloads = [...filteredDownloads].sort((a, b) => b.id.localeCompare(a.id));
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#FAF8F5] text-[#3D3B38] font-['Vazirmatn',sans-serif]">
-      {/* Top Header */}
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-['Vazirmatn',sans-serif] transition-colors duration-200 pb-24">
+      
+      {/* Header */}
       <Header
-        onOpenHistory={() => setIsHistoryOpen(true)}
-        onOpenPrivacy={() => setIsPrivacyOpen(true)}
-        historyCount={history.length}
-        onReset={handleReset}
-        hasActiveResult={!!currentAnalysis}
-        freeTokens={freeTokens}
-        isPremium={isPremium}
-        onOpenCoinModal={() => setIsCoinModalOpen(true)}
+        darkMode={darkMode}
+        setDarkMode={setDarkMode}
+        onOpenAddModal={() => setIsAddModalOpen(true)}
+        activeCount={activeCount}
+        completedCount={completedCount}
+        totalStorageUsed={formatBytes(totalStorageUsedBytes)}
       />
 
-      {/* Main Container */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8">
-        {/* پیام خطای پردازش هوش مصنوعی */}
-        {error && (
-          <div className="max-w-4xl mx-auto mb-6 p-4 bg-[#FAF0ED] border border-[#E9C8BC] rounded-2xl text-[#8B4513] text-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="w-5 h-5 text-[#8B4513] shrink-0 mt-0.5" />
-              <div>
-                <p className="font-bold">خطا در پردازش هوش مصنوعی</p>
-                <p className="text-xs sm:text-sm mt-0.5 text-[#6B3410]">{error}</p>
-              </div>
-            </div>
-            {lastAnalyzePayload && (
-              <button
-                onClick={handleRetryAnalyze}
-                disabled={isLoading}
-                className="flex items-center justify-center gap-1.5 px-4 py-2 bg-[#8B4513] hover:bg-[#72380F] disabled:bg-[#C4A496] text-white rounded-xl font-bold text-xs transition-colors shrink-0 cursor-pointer shadow-xs"
-              >
-                <RefreshCcw className="w-3.5 h-3.5" />
-                <span>تلاش مجدد</span>
-              </button>
-            )}
-          </div>
-        )}
+      {/* Main Content Container */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+        
+        {activeMainTab !== 'schedule' ? (
+          <>
+            {/* Categories Tabs */}
+            <CategoryTabs
+              selectedCategory={selectedCategory}
+              onSelectCategory={setSelectedCategory}
+              counts={counts}
+            />
 
-        {/* هشدار ملایم اتمام رو به پایان توکن‌ها (وقتی زیر ۵ سکه مانده باشد) */}
-        {!isPremium && freeTokens > 0 && freeTokens < 5 && !dismissedLowTokenWarning && !showPremiumPrompt && (
-          <div
-            id="banner-low-tokens"
-            className="max-w-4xl mx-auto mb-6 p-4 sm:p-5 bg-gradient-to-r from-amber-50/90 to-yellow-50/90 border border-amber-200 rounded-2xl shadow-xs text-right animate-in fade-in flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
-          >
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs mt-0.5">
-                <Sparkles className="w-5 h-5 text-amber-100" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h4 className="font-bold text-amber-950 text-sm sm:text-base">
-                    اعتبار رو به پایان است ({freeTokens} تحلیل باقی‌مانده)
-                  </h4>
-                  <span className="px-2 py-0.5 rounded-full bg-amber-200/60 text-amber-900 text-[10px] font-extrabold">
-                    رو به اتمام
+            {/* Clear Completed Bar if completed tab */}
+            <SearchBar
+              onClearCompleted={activeMainTab === 'completed' ? handleClearCompleted : undefined}
+            />
+
+            {/* Downloads List */}
+            <div className="space-y-4">
+
+              <div className="flex items-center justify-between">
+                <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <FolderOpen className="w-5 h-5 text-blue-600" />
+                  <span>{activeMainTab === 'completed' ? 'فایل‌های دانلود شده' : 'صف دانلود و در حال انجام'}</span>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                    {sortedDownloads.length}
                   </span>
-                </div>
-                <p className="text-xs text-amber-800/90 mt-0.5 leading-relaxed">
-                  تعداد تحلیل‌های رایگان شما در این دستگاه رو به اتمام است. برای جلوگیری از توقف، می‌توانید سکه یا اشتراک پرمیوم تهیه کنید.
-                </p>
+                </h2>
               </div>
-            </div>
-            <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
-              <button
-                onClick={() => setIsCoinModalOpen(true)}
-                className="flex-1 sm:flex-none px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
-              >
-                <Crown className="w-3.5 h-3.5" />
-                <span>افزایش سکه و پرمیوم</span>
-              </button>
-              <button
-                onClick={() => setDismissedLowTokenWarning(true)}
-                className="p-2 text-amber-800 hover:bg-amber-100/80 rounded-xl transition-colors cursor-pointer"
-                title="بستن موقت"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        )}
 
-        {/* کارت اعلان پایان توکن‌های رایگان (در بالای صفحه بارگذاری) */}
-        {showPremiumPrompt && (
-          <div
-            id="banner-limit-reached"
-            className="max-w-4xl mx-auto mb-6 p-5 sm:p-6 bg-gradient-to-r from-[#FAF6EC] to-[#F5EEDC] border border-[#E5DBBF] rounded-2xl sm:rounded-3xl shadow-xs text-right animate-in fade-in"
-          >
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <div className="flex items-start gap-3.5">
-                <div className="w-12 h-12 rounded-2xl bg-[#8F7732] text-white flex items-center justify-center shrink-0 shadow-xs mt-0.5">
-                  <Crown className="w-6 h-6 text-[#FFF5D0]" />
-                </div>
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base sm:text-lg font-bold text-[#4A4844]">
-                      پایان سقف تحلیل‌های رایگان (۲ ابلاغیه)
-                    </h3>
-                    <span className="px-2 py-0.5 rounded-md bg-[#8F7732]/10 text-[#8F7732] text-[11px] font-bold">
-                      دستگاه جاری
-                    </span>
+              {sortedDownloads.length === 0 ? (
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-12 text-center space-y-4 my-8 shadow-xs">
+                  <div className="w-16 h-16 rounded-2xl bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto">
+                    <Download className="w-8 h-8" />
                   </div>
-                  <p className="text-xs sm:text-sm text-[#6E5D2A] leading-relaxed max-w-2xl">
-                    شما از ۲ فرصت تحلیل رایگان ابلاغیه در این دستگاه استفاده نموده‌اید. برای تحلیل نامحدود ابلاغیه‌ها، تنظیم پیش‌نویس لوایح و مشورت نامحدود با دستیار حقوقی، نسخه پرمیوم را فعال فرمایید.
-                  </p>
+                  <div className="space-y-1 max-w-sm mx-auto">
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                      {activeMainTab === 'completed' ? 'هیچ فایل دانلود‌شده‌ای وجود ندارد' : 'هیچ دانلود فعالی در صف نیست'}
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      {activeMainTab === 'completed' ? 'پس از اتمام دانلودها، فایل‌ها در این بخش قرار می‌گیرند.' : 'می‌توانید با کلیک روی افزودن لینک، دانلود جدیدی را شروع کنید.'}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setIsAddModalOpen(true)}
+                    className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-medium px-5 py-2.5 rounded-xl shadow-md shadow-blue-600/20 text-xs sm:text-sm transition cursor-pointer"
+                  >
+                    افزودن لینک دانلود جدید
+                  </button>
                 </div>
-              </div>
-
-              <div className="flex items-center gap-2.5 w-full sm:w-auto pt-2 sm:pt-0">
-                <button
-                  id="btn-buy-premium-banner"
-                  onClick={handleBuyPremium}
-                  className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-[#8F7732] hover:bg-[#776326] text-white font-bold text-xs sm:text-sm transition-all shadow-xs cursor-pointer shrink-0"
-                >
-                  <Sparkles className="w-4 h-4 text-[#FFF2B2]" />
-                  <span>خرید نسخه پرمیوم</span>
-                </button>
-                <button
-                  onClick={() => setShowPremiumPrompt(false)}
-                  className="p-2.5 rounded-xl text-[#8F7732] hover:bg-[#EBE3CD] transition-colors cursor-pointer"
-                  title="بستن پیام"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-4">
+                  {sortedDownloads.map((item) => (
+                    <DownloadCard
+                      key={item.id}
+                      item={item}
+                      onPauseResume={handlePauseResume}
+                      onCancelDelete={handleCancelDelete}
+                      onRetry={handleRetry}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
-          </div>
-        )}
-
-        {!currentAnalysis ? (
-          <UploadZone
-            onAnalyze={handleAnalyze}
-            onSelectSample={handleSelectSample}
-            isLoading={isLoading}
-          />
+          </>
         ) : (
-          <div className="space-y-8">
-            <AnalysisResult
-              analysis={currentAnalysis}
-              onOpenChat={scrollToChat}
-              onAskSectionQuestion={handleAskSectionQuestion}
-              onOpenClauseModal={handleOpenClauseModal}
-              onOpenDefenseDraft={() => setIsDefenseDraftOpen(true)}
-            />
-
-            {/* AI Legal Assistant Chat */}
-            <LegalAssistantChat
-              analysis={currentAnalysis}
-              activeSectionContext={activeSectionContext}
-              onClearSectionContext={() => setActiveSectionContext(null)}
-              onOpenClauseInquiry={() => handleOpenClauseModal()}
+          <div className="space-y-6 animate-fade-in">
+            <SchedulePanel
+              schedule={scheduleSettings}
+              setSchedule={setScheduleSettings}
+              isCurrentlyInScheduleWindow={isCurrentlyInScheduleWindow}
             />
           </div>
         )}
+
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-[#E5E2D9] bg-white py-6 mt-12 text-xs text-[#7A7874] print:hidden">
-        <div className="max-w-6xl mx-auto px-4 space-y-4">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Scale className="w-4 h-4 text-[#7A8C70]" />
-              <span className="font-semibold text-[#4A4844]">
-                سامانه هوشمند تحلیل و ساده‌سازی ابلاغیه قضایی
-              </span>
-            </div>
-            <div className="flex items-center gap-4">
-              <button
-                onClick={() => setIsPrivacyOpen(true)}
-                className="text-[#5A6D52] hover:text-[#3D4839] font-medium underline underline-offset-4 cursor-pointer"
-              >
-                بیانیه حقوقی، سلب مسئولیت و حفظ حریم خصوصی
-              </button>
-            </div>
-          </div>
-
-          <div className="p-3 bg-[#FAF8F5] border border-[#EBE8E0] rounded-2xl text-[11px] text-[#7A7874] leading-relaxed flex items-start gap-2.5">
-            <Scale className="w-4 h-4 text-[#8B4513] shrink-0 mt-0.5" />
-            <p>
-              <strong>سلب مسئولیت حقوقی (ماده ۵۵ قانون وکالت):</strong> این سامانه به عنوان ابزار فناوری حقوقی (LegalTech) جهت ارتقای سواد حقوقی و درک آسان‌تر مفاد ابلاغیه‌ها طراحی شده است. تحلیل‌های تولیدشده جنبه مشورتی و آگاهی‌بخشی داشته و جایگزین مستقیم وکیل پایه یک دادگستری و تصمیمات مراجع قضایی جمهوری اسلامی ایران نمی‌باشد.
-            </p>
-          </div>
+      <footer className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 py-4 text-center text-xs text-slate-500 dark:text-slate-400 transition-colors duration-200 mb-16">
+        <div className="max-w-7xl mx-auto px-4 flex items-center justify-center">
+          <p>آندو دانلودر © 2026 - مدیر دانلود هوشمند</p>
         </div>
       </footer>
 
-      {/* History Drawer */}
-      <HistoryDrawer
-        isOpen={isHistoryOpen}
-        onClose={() => setIsHistoryOpen(false)}
-        history={history}
-        onSelectHistoryItem={handleSelectHistoryItem}
-        onClearHistory={handleClearHistory}
-        onDeleteHistoryItem={handleDeleteHistoryItem}
+      {/* Bottom Sticky Tab Bar (3 Tabs for Clean UI) */}
+      <nav aria-label="منوی پایین صفحه" className="fixed bottom-0 left-0 right-0 z-40 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 shadow-lg py-2 px-4">
+        <div className="max-w-xl mx-auto grid grid-cols-3 gap-2">
+          <button
+            onClick={() => setActiveMainTab('active')}
+            className={`flex items-center justify-center gap-1.5 py-3 rounded-2xl font-semibold text-xs transition-all cursor-pointer ${
+              activeMainTab === 'active'
+                ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <ListFilter className="w-4 h-4" />
+            <span>در حال دانلود ({downloads.filter(d => d.status !== 'completed').length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveMainTab('completed')}
+            className={`flex items-center justify-center gap-1.5 py-3 rounded-2xl font-semibold text-xs transition-all cursor-pointer ${
+              activeMainTab === 'completed'
+                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <FolderOpen className="w-4 h-4" />
+            <span>فایل‌های دانلود شده ({completedCount})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveMainTab('schedule')}
+            className={`flex items-center justify-center gap-1.5 py-3 rounded-2xl font-semibold text-xs transition-all cursor-pointer relative ${
+              activeMainTab === 'schedule'
+                ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <Clock className="w-4 h-4" />
+            <span>تب زمان‌بندی</span>
+            {scheduleSettings.enabled && (
+              <span className="absolute top-1.5 right-2 w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+            )}
+          </button>
+        </div>
+      </nav>
+
+      {/* Add Download Modal */}
+      <AddDownloadModal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        onAddDownload={handleAddDownload}
       />
 
-      {/* Privacy Notice Modal */}
-      <PrivacyNoticeModal
-        isOpen={isPrivacyOpen}
-        onClose={() => setIsPrivacyOpen(false)}
-      />
-      {/* Coin Purchase Modal */}
-      <CoinPurchaseModal
-        isOpen={isCoinModalOpen}
-        onClose={() => setIsCoinModalOpen(false)}
-        deviceId={deviceId}
-        isPremium={isPremium}
-        freeTokens={freeTokens}
-        onSuccessUpdate={(tokens, premium) => {
-          setFreeTokens(tokens);
-          setIsPremium(premium);
-          setShowPremiumPrompt(false);
-        }}
+      {/* Undo Snackbar Notification */}
+      <UndoSnackbar
+        notification={undoNotification}
+        onUndo={handleUndo}
+        onDismiss={() => setUndoNotification(null)}
       />
 
-      {/* Clause Inquiry Modal */}
-      <ClauseInquiryModal
-        isOpen={clauseModalState.isOpen}
-        onClose={() => setClauseModalState((prev) => ({ ...prev, isOpen: false }))}
-        analysis={currentAnalysis}
-        initialClause={clauseModalState.initialClause}
-        initialQuestion={clauseModalState.initialQuestion}
-        sectionTitle={clauseModalState.sectionTitle}
-        onSendToMainChat={handleSendClauseToMainChat}
-      />
-
-      {/* Defense Draft Modal */}
-      {currentAnalysis && (
-        <DefenseDraftModal
-          isOpen={isDefenseDraftOpen}
-          onClose={() => setIsDefenseDraftOpen(false)}
-          analysis={currentAnalysis}
-        />
-      )}
-
-      {/* Scroll to top button */}
-      {showScrollTop && (
-        <button
-          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-          className="fixed bottom-6 left-6 p-3 rounded-full bg-[#4A4844] text-[#FAF8F5] shadow-lg hover:bg-[#3D3B38] transition-all z-40 print:hidden cursor-pointer"
-          title="بازگشت به بالای صفحه"
-        >
-          <ArrowUp className="w-5 h-5" />
-        </button>
-      )}
     </div>
   );
 }
+

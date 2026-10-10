@@ -1,133 +1,106 @@
-import React from "react";
-import {
-  Scale,
-  ShieldCheck,
-  History,
-  FileText,
-  Coins,
-  Crown,
-} from "lucide-react";
+import React, { useState } from 'react';
+import { Download, Moon, Sun, Plus, RefreshCw } from 'lucide-react';
 
 interface HeaderProps {
-  onOpenHistory: () => void;
-  onOpenPrivacy: () => void;
-  historyCount: number;
-  onReset: () => void;
-  hasActiveResult: boolean;
-  freeTokens: number;
-  isPremium: boolean;
-  onOpenCoinModal: () => void;
+  darkMode: boolean;
+  setDarkMode: (val: boolean) => void;
+  onOpenAddModal: () => void;
+  activeCount: number;
+  completedCount: number;
+  totalStorageUsed: string;
 }
 
 export const Header: React.FC<HeaderProps> = ({
-  onOpenHistory,
-  onOpenPrivacy,
-  historyCount,
-  onReset,
-  hasActiveResult,
-  freeTokens,
-  isPremium,
-  onOpenCoinModal,
+  darkMode,
+  setDarkMode,
+  onOpenAddModal,
+  activeCount,
+  completedCount,
+  totalStorageUsed,
 }) => {
-  const toPersianDigits = (str: string | number) => {
-    const persian = ["۰", "۱", "۲", "۳", "۴", "۵", "۶", "۷", "۸", "۹"];
-    return String(str).replace(/\d/g, (d) => persian[parseInt(d, 10)]);
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  const handleUpdateEngine = async () => {
+    setIsUpdating(true);
+    try {
+      const res = await fetch('/api/update-engine', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(data.message + (data.version ? ` (${data.version})` : ''));
+      } else {
+        alert(data.error || 'خطا در بروزرسانی موتور دانلود');
+      }
+    } catch (err: any) {
+      alert(err.message || 'خطا در ارتباط با سرور');
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
   return (
-    <header className="border-b border-[#E5E2D9] bg-white sticky top-0 z-30 shadow-xs">
-      <div className="max-w-6xl mx-auto px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2">
-        {/* Brand */}
-        <div
-          id="brand-logo"
-          onClick={onReset}
-          className="flex items-center gap-2 sm:gap-3 cursor-pointer group shrink-0"
-        >
-          <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-[#7A8C70] text-white flex items-center justify-center shadow-xs transition-transform group-hover:scale-105 shrink-0">
-            <Scale className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+    <header className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 sticky top-0 z-30 transition-colors duration-200">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        
+        {/* Logo & Title */}
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-md shadow-blue-500/20">
+            <Download className="w-5 h-5" />
           </div>
-          <div className="flex flex-col justify-center">
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              <h1 className="font-black text-[#3D3B38] text-base sm:text-lg leading-none tracking-tight">
-                ابلاغ‌یار
-              </h1>
-              <span className="hidden md:inline-flex text-[10px] font-bold bg-[#F0F4EF] text-[#5A6D52] border border-[#D5DFD0] px-2 py-0.5 rounded-full items-center gap-1">
-                <span>سامانه هوشمند تحلیل ابلاغیه</span>
-              </span>
-            </div>
-            <p className="text-[11px] text-[#7A7874] hidden lg:block mt-0.5">
-              تحلیل آنی و هوشمند ابلاغیه‌های قضایی سامانه ثنا
+          <div>
+            <h1 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white leading-tight">
+              آندو دانلودر
+            </h1>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              مدیر دانلود هوشمند
             </p>
           </div>
         </div>
 
-        {/* Actions & Coin Token Badge */}
-        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-          {/* Coin Token Badge */}
-          <div 
-            id="token-coin-badge"
-            onClick={onOpenCoinModal}
-            className="flex items-center gap-1.5 bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-200/80 px-2.5 sm:px-3 py-1 rounded-full shadow-xs cursor-pointer hover:bg-amber-100/70 transition-all group"
-            title={isPremium ? "حساب پرمیوم نامحدود فعال است (کلیک برای خرید سکه)" : `${freeTokens} تحلیل رایگان باقیمانده (کلیک برای خرید سکه و ارتقا)`}
-          >
-            <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-gradient-to-tr from-amber-500 via-yellow-400 to-amber-300 flex items-center justify-center text-white shadow-xs shrink-0 ring-2 ring-amber-100 group-hover:scale-105 transition-transform">
-              {isPremium ? (
-                <Crown className="w-3 h-3 text-amber-950" />
-              ) : (
-                <Coins className="w-3 h-3 text-amber-950" />
-              )}
-            </div>
-            <div className="text-xs font-extrabold text-amber-950 flex items-center gap-1">
-              {isPremium ? (
-                <span className="text-[11px] sm:text-xs text-amber-800 font-black">پریمیوم</span>
-              ) : (
-                <div className="flex items-center gap-1">
-                  <span className="text-sm font-black text-amber-900">{toPersianDigits(freeTokens)}</span>
-                  <span className="text-[10px] sm:text-xs text-amber-700/80 font-semibold hidden sm:inline">سکه</span>
-                </div>
-              )}
-            </div>
-          </div>
+        {/* Minimal stats */}
+        <div className="hidden md:flex items-center gap-4 text-xs text-slate-600 dark:text-slate-300 font-medium bg-slate-100 dark:bg-slate-800/60 px-3.5 py-1.5 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
+          <span>فعال: <strong className="text-slate-900 dark:text-white">{activeCount}</strong></span>
+          <span>•</span>
+          <span>تکمیل: <strong className="text-slate-900 dark:text-white">{completedCount}</strong></span>
+          <span>•</span>
+          <span>حجم: <strong className="text-slate-900 dark:text-white">{totalStorageUsed}</strong></span>
+        </div>
 
-          {hasActiveResult && (
-            <button
-              id="new-analysis-btn"
-              onClick={onReset}
-              className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-semibold text-[#5A6D52] bg-[#F0F4EF] hover:bg-[#E2EBE0] border border-[#D5DFD0] rounded-xl transition-colors cursor-pointer"
-              title="بارگذاری و تحلیل ابلاغیه جدید"
-            >
-              <FileText className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#7A8C70]" />
-              <span className="hidden sm:inline">ابلاغیه جدید</span>
-              <span className="sm:hidden text-[11px]">جدید</span>
-            </button>
-          )}
-
+        {/* Actions */}
+        <div className="flex items-center gap-2">
           <button
-            id="history-btn"
-            onClick={onOpenHistory}
-            className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium text-[#5C5A55] hover:text-[#3D3B38] hover:bg-[#F3F1ED] border border-[#E5E2D9] rounded-xl transition-colors relative cursor-pointer"
-            title="تاریخچه تحلیل‌های شما"
+            onClick={handleUpdateEngine}
+            disabled={isUpdating}
+            title="بروزرسانی موتور دانلود"
+            className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl border border-indigo-200 dark:border-indigo-900/50 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-100 transition text-xs font-semibold cursor-pointer disabled:opacity-50"
           >
-            <History className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#7A8C70]" />
-            <span className="hidden md:inline">تاریخچه</span>
-            {historyCount > 0 && (
-              <span className="w-4 h-4 sm:w-5 sm:h-5 flex items-center justify-center rounded-full bg-[#7A8C70] text-white text-[9px] sm:text-[10px] font-bold">
-                {toPersianDigits(historyCount)}
-              </span>
-            )}
+            <RefreshCw className={`w-3.5 h-3.5 ${isUpdating ? 'animate-spin' : ''}`} />
+            <span>{isUpdating ? 'بروزرسانی...' : 'بروزرسانی موتور'}</span>
           </button>
 
           <button
-            id="privacy-btn"
-            onClick={onOpenPrivacy}
-            className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-[#7A7874] hover:text-[#3D3B38] hover:bg-[#F3F1ED] rounded-xl transition-colors cursor-pointer"
-            title="حریم خصوصی و امنیت"
+            onClick={() => setDarkMode(!darkMode)}
+            aria-label="تغییر تم"
+            className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer"
+            title="تغییر حالت تاریک/روشن"
           >
-            <ShieldCheck className="w-4 h-4 text-[#7A8C70]" />
-            <span>قوانین و حریم خصوصی</span>
+            {darkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-indigo-600" />}
+          </button>
+
+          <button
+            onClick={onOpenAddModal}
+            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-medium px-4 py-2 rounded-xl shadow-sm shadow-blue-600/20 transition text-xs sm:text-sm cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>افزودن لینک</span>
           </button>
         </div>
+
       </div>
     </header>
   );
 };
+
+

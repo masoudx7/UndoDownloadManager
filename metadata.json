@@ -1,0 +1,8 @@
+{
+  "name": "Undo Downloader - مدیر دانلود هوشمند",
+  "description": "سیستم پیشرفته مدیریت و لغو هوشمند دانلودها با قابلیت Undo، دسته‌بندی خودکار، سرعت لحظه‌ای و ذخیره‌سازی محلی",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
