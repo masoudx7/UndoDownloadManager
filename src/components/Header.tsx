@@ -1,22 +1,30 @@
 import React, { useState } from 'react';
-import { Download, Moon, Sun, Plus, RefreshCw } from 'lucide-react';
+import { Download, Moon, Sun, Plus, RefreshCw, Coins, Crown, Zap } from 'lucide-react';
 
 interface HeaderProps {
   darkMode: boolean;
   setDarkMode: (val: boolean) => void;
   onOpenAddModal: () => void;
+  onOpenCoinShop: () => void;
   activeCount: number;
   completedCount: number;
   totalStorageUsed: string;
+  freeDownloadsRemaining: number;
+  purchasedCoins: number;
+  isUnlimited: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   darkMode,
   setDarkMode,
   onOpenAddModal,
+  onOpenCoinShop,
   activeCount,
   completedCount,
   totalStorageUsed,
+  freeDownloadsRemaining,
+  purchasedCoins,
+  isUnlimited,
 }) => {
   const [isUpdating, setIsUpdating] = useState(false);
 
@@ -60,7 +68,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Minimal stats */}
-        <div className="hidden md:flex items-center gap-4 text-xs text-slate-600 dark:text-slate-300 font-medium bg-slate-100 dark:bg-slate-800/60 px-3.5 py-1.5 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
+        <div className="hidden lg:flex items-center gap-4 text-xs text-slate-600 dark:text-slate-300 font-medium bg-slate-100 dark:bg-slate-800/60 px-3.5 py-1.5 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
           <span>فعال: <strong className="text-slate-900 dark:text-white">{activeCount}</strong></span>
           <span>•</span>
           <span>تکمیل: <strong className="text-slate-900 dark:text-white">{completedCount}</strong></span>
@@ -70,6 +78,22 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Actions */}
         <div className="flex items-center gap-2">
+          
+          {/* Coin Shop Button */}
+          <button
+            onClick={onOpenCoinShop}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 hover:bg-amber-100 transition text-xs font-bold cursor-pointer shadow-xs"
+          >
+            {isUnlimited ? (
+              <Crown className="w-4 h-4 text-emerald-500" />
+            ) : (
+              <Coins className="w-4 h-4 text-amber-500" />
+            )}
+            <span>
+              {isUnlimited ? 'نامحدود ♾️' : `رایگان: ${freeDownloadsRemaining} | سکه: ${purchasedCoins}`}
+            </span>
+          </button>
+
           <button
             onClick={handleUpdateEngine}
             disabled={isUpdating}
@@ -102,5 +126,6 @@ export const Header: React.FC<HeaderProps> = ({
     </header>
   );
 };
+
 
 

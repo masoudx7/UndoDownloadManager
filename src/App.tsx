@@ -7,14 +7,19 @@ import { CategoryTabs } from './components/CategoryTabs';
 import { SearchBar } from './components/SearchBar';
 import { DownloadCard } from './components/DownloadCard';
 import { AddDownloadModal } from './components/AddDownloadModal';
+import { CoinShopModal } from './components/CoinShopModal';
 import { UndoSnackbar } from './components/UndoSnackbar';
 import { SchedulePanel } from './components/SchedulePanel';
 import { Download, Sparkles, FolderOpen, Clock, ListFilter, Pause, Play, CheckCheck, Trash2 } from 'lucide-react';
 import { formatBytes } from './utils/formatters';
+import { billingService, PRODUCT_SKUS } from './utils/billing';
 
 const STORAGE_KEY = 'undo_downloader_items_v1';
 const DARK_MODE_KEY = 'undo_downloader_dark_mode';
 const SCHEDULE_KEY = 'undo_downloader_schedule_v1';
+const FREE_DOWNLOADS_KEY = 'undo_downloader_free_downloads_v1';
+const PURCHASED_COINS_KEY = 'undo_downloader_purchased_coins_v1';
+const UNLIMITED_KEY = 'undo_downloader_unlimited_v1';
 
 export default function App() {
   const [darkMode, setDarkMode] = useState<boolean>(() => {
@@ -49,9 +54,34 @@ export default function App() {
     };
   });
 
+  const [freeDownloadsRemaining, setFreeDownloadsRemaining] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem(FREE_DOWNLOADS_KEY);
+      if (saved !== null) return JSON.parse(saved);
+    } catch {}
+    return 5; // 5 free downloads per month
+  });
+
+  const [purchasedCoins, setPurchasedCoins] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem(PURCHASED_COINS_KEY);
+      if (saved !== null) return JSON.parse(saved);
+    } catch {}
+    return 0;
+  });
+
+  const [isUnlimited, setIsUnlimited] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem(UNLIMITED_KEY);
+      if (saved !== null) return JSON.parse(saved);
+    } catch {}
+    return false;
+  });
+
   const [activeMainTab, setActiveMainTab] = useState<'active' | 'completed' | 'schedule'>('active');
   const [selectedCategory, setSelectedCategory] = useState<DownloadCategory>('all');
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
+  const [isCoinShopOpen, setIsCoinShopOpen] = useState<boolean>(false);
   const [undoNotification, setUndoNotification] = useState<UndoNotification | null>(null);
   const [isCurrentlyInScheduleWindow, setIsCurrentlyInScheduleWindow] = useState<boolean>(false);
 
@@ -84,6 +114,15 @@ export default function App() {
       localStorage.setItem(SCHEDULE_KEY, JSON.stringify(scheduleSettings));
     } catch (e) {}
   }, [scheduleSettings]);
+
+  // Persist user coins & downloads status
+  useEffect(() => {
+    try {
+      localStorage.setItem(FREE_DOWNLOADS_KEY, JSON.stringify(freeDownloadsRemaining));
+      localStorage.setItem(PURCHASED_COINS_KEY, JSON.stringify(purchasedCoins));
+      localStorage.setItem(UNLIMITED_KEY, JSON.stringify(isUnlimited));
+    } catch (e) {}
+  }, [freeDownloadsRemaining, purchasedCoins, isUnlimited]);
 
   // Schedule time window checker & auto start/stop
   useEffect(() => {
@@ -212,6 +251,18 @@ export default function App() {
   };
 
   const handleAddDownload = (url: string, name: string, category: DownloadCategory, fileSize: number) => {
+    if (!isUnlimited) {
+      if (freeDownloadsRemaining > 0) {
+        setFreeDownloadsRemaining((prev) => prev - 1);
+      } else if (purchasedCoins > 0) {
+        setPurchasedCoins((prev) => prev - 1);
+      } else {
+        setIsCoinShopOpen(true);
+        alert('موجودی دانلود رایگان ماهانه و سکه‌های شما به پایان رسیده است. لطفاً بسته خرید سکه یا اشتراک تهیه کنید.');
+        return;
+      }
+    }
+
     const newItem: DownloadItem = {
       id: uuidv4(),
       name,
@@ -233,6 +284,38 @@ export default function App() {
     };
 
     setDownloads((prev) => [newItem, ...prev]);
+  };
+
+  const handleBuyPackage = async (type: 'coins_10' | 'coins_30' | 'unlimited_1m' | 'unlimited_3m' | 'unlimited') => {
+    let sku: string = PRODUCT_SKUS.COINS_10;
+    if (type === 'coins_30') sku = PRODUCT_SKUS.COINS_30;
+    else if (type === 'unlimited_1m') sku = PRODUCT_SKUS.UNLIMITED_1M;
+    else if (type === 'unlimited_3m') sku = PRODUCT_SKUS.UNLIMITED_3M;
+    else if (type === 'unlimited') sku = PRODUCT_SKUS.UNLIMITED_1Y;
+
+    const result = await billingService.purchase(sku);
+    if (!result.success) {
+      alert(result.error || 'خرید ناموفق بود.');
+      return;
+    }
+
+    if (type === 'coins_10') {
+      setPurchasedCoins((prev) => prev + 10);
+      alert('بسته ۱۰ تایی (۷۹,۰۰۰ تومان) با موفقیت خریداری شد و ۱۰ دانلود به حساب شما اضافه گردید!');
+    } else if (type === 'coins_30') {
+      setPurchasedCoins((prev) => prev + 30);
+      alert('بسته ۳۰ تایی (۱۷۹,۰۰۰ تومان) با موفقیت خریداری شد و ۳۰ دانلود به حساب شما اضافه گردید!');
+    } else if (type === 'unlimited_1m') {
+      setIsUnlimited(true);
+      alert('اشتراک ۱ ماهه نامحدود (۸۹,۰۰۰ تومان) با موفقیت فعال شد! اکنون به مدت ۳۰ روز می‌توانید به صورت نامحدود دانلود کنید.');
+    } else if (type === 'unlimited_3m') {
+      setIsUnlimited(true);
+      alert('اشتراک ۳ ماهه نامحدود (۱۹۹,۰۰۰ تومان) با موفقیت فعال شد! اکنون به مدت ۹۰ روز می‌توانید به صورت نامحدود دانلود کنید.');
+    } else if (type === 'unlimited') {
+      setIsUnlimited(true);
+      alert('اشتراک یکساله نامحدود (۳۹۹,۰۰۰ تومان) با موفقیت فعال شد! اکنون می‌توانید به صورت نامحدود دانلود کنید.');
+    }
+    setIsCoinShopOpen(false);
   };
 
   const handleClearCompleted = () => {
@@ -274,9 +357,13 @@ export default function App() {
         darkMode={darkMode}
         setDarkMode={setDarkMode}
         onOpenAddModal={() => setIsAddModalOpen(true)}
+        onOpenCoinShop={() => setIsCoinShopOpen(true)}
         activeCount={activeCount}
         completedCount={completedCount}
         totalStorageUsed={formatBytes(totalStorageUsedBytes)}
+        freeDownloadsRemaining={freeDownloadsRemaining}
+        purchasedCoins={purchasedCoins}
+        isUnlimited={isUnlimited}
       />
 
       {/* Main Content Container */}
@@ -412,6 +499,16 @@ export default function App() {
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
         onAddDownload={handleAddDownload}
+      />
+
+      {/* Coin Shop Modal */}
+      <CoinShopModal
+        isOpen={isCoinShopOpen}
+        onClose={() => setIsCoinShopOpen(false)}
+        freeDownloadsRemaining={freeDownloadsRemaining}
+        purchasedCoins={purchasedCoins}
+        isUnlimited={isUnlimited}
+        onBuyPackage={handleBuyPackage}
       />
 
       {/* Undo Snackbar Notification */}
