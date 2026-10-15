@@ -1,95 +1,155 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { DownloadItem, DownloadCategory, DownloadStatus, SortOption, UndoNotification, ScheduleSettings } from './types';
+import { DownloadItem, DownloadCategory, DownloadStatus, ScheduleSettings, UndoNotification } from './types';
 import { initialDownloads } from './data/initialDownloads';
 import { Header } from './components/Header';
 import { CategoryTabs } from './components/CategoryTabs';
 import { SearchBar } from './components/SearchBar';
 import { DownloadCard } from './components/DownloadCard';
-import { AddDownloadModal } from './components/AddDownloadModal';
+import { AddDownloadModal, AddDownloadOptions } from './components/AddDownloadModal';
 import { CoinShopModal } from './components/CoinShopModal';
 import { UndoSnackbar } from './components/UndoSnackbar';
 import { SchedulePanel } from './components/SchedulePanel';
-import { Download, Sparkles, FolderOpen, Clock, ListFilter, Pause, Play, CheckCheck, Trash2 } from 'lucide-react';
+import { Download, FolderOpen, Clock, ListFilter, WifiOff, AlertTriangle } from 'lucide-react';
 import { formatBytes } from './utils/formatters';
-import { billingService, PRODUCT_SKUS } from './utils/billing';
-
-const STORAGE_KEY = 'undo_downloader_items_v1';
-const DARK_MODE_KEY = 'undo_downloader_dark_mode';
-const SCHEDULE_KEY = 'undo_downloader_schedule_v1';
-const FREE_DOWNLOADS_KEY = 'undo_downloader_free_downloads_v1';
-const PURCHASED_COINS_KEY = 'undo_downloader_purchased_coins_v1';
-const UNLIMITED_KEY = 'undo_downloader_unlimited_v1';
+import { billingService } from './utils/billing';
+import { ytDlpService } from './services/ytDlpService';
+import { storageService } from './services/storageService';
+import { downloadQueueManager } from './services/downloadQueueManager';
+import { networkService } from './services/networkService';
 
 export default function App() {
   const [darkMode, setDarkMode] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem(DARK_MODE_KEY);
-      if (saved !== null) return JSON.parse(saved);
-      return window.matchMedia('(prefers-color-scheme: dark)').matches;
-    } catch {
-      return false;
-    }
+    return storageService.getDarkMode();
   });
 
   const [downloads, setDownloads] = useState<DownloadItem[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) return JSON.parse(saved);
-    } catch (e) {
-      console.error('Failed to load downloads from localStorage', e);
-    }
-    return initialDownloads;
+    return downloadQueueManager.sanitizeItemsOnStartup(storageService.getDownloads());
   });
 
   const [scheduleSettings, setScheduleSettings] = useState<ScheduleSettings>(() => {
-    try {
-      const saved = localStorage.getItem(SCHEDULE_KEY);
-      if (saved) return JSON.parse(saved);
-    } catch (e) {}
-    return {
-      enabled: false,
-      startTime: '02:00',
-      endTime: '07:00',
-    };
+    return storageService.getSchedule();
   });
 
   const [freeDownloadsRemaining, setFreeDownloadsRemaining] = useState<number>(() => {
-    try {
-      const saved = localStorage.getItem(FREE_DOWNLOADS_KEY);
-      if (saved !== null) return JSON.parse(saved);
-    } catch {}
-    return 5; // 5 free downloads per month
+    return storageService.getFreeDownloads();
   });
 
   const [purchasedCoins, setPurchasedCoins] = useState<number>(() => {
-    try {
-      const saved = localStorage.getItem(PURCHASED_COINS_KEY);
-      if (saved !== null) return JSON.parse(saved);
-    } catch {}
-    return 0;
+    return storageService.getPurchasedCoins();
   });
 
   const [isUnlimited, setIsUnlimited] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem(UNLIMITED_KEY);
-      if (saved !== null) return JSON.parse(saved);
-    } catch {}
-    return false;
+    return storageService.isUnlimited();
   });
+
+  const [unlimitedExpiry, setUnlimitedExpiry] = useState<string | undefined>(() => {
+    return storageService.getUnlimitedExpiryFormatted() || undefined;
+  });
+
+  const [concurrentLimit, setConcurrentLimit] = useState<number>(() => {
+    return downloadQueueManager.getMaxConcurrent();
+  });
+
+  const [isOnline, setIsOnline] = useState<boolean>(() => {
+    return networkService.getOnlineStatus();
+  });
+
+  const [scheduleNotice, setScheduleNotice] = useState<string | null>(null);
+
+  const refreshBillingState = () => {
+    setPurchasedCoins(storageService.getPurchasedCoins());
+    setIsUnlimited(storageService.isUnlimited());
+    setUnlimitedExpiry(storageService.getUnlimitedExpiryFormatted() || undefined);
+    setFreeDownloadsRemaining(storageService.getFreeDownloads());
+  };
+
+  // Ref to hold latest downloads and schedule for timer and network callbacks
+  const downloadsRef = useRef(downloads);
+  downloadsRef.current = downloads;
+
+  const scheduleRef = useRef(scheduleSettings);
+  scheduleRef.current = scheduleSettings;
+
+  // Bootstrap persistent Capacitor storage & auto-restore purchases on app start
+  useEffect(() => {
+    let isMounted = true;
+
+    const bootstrapStorageAndPurchases = async () => {
+      try {
+        const snapshot = await storageService.init();
+        if (!isMounted) return;
+
+        const sanitized = downloadQueueManager.sanitizeItemsOnStartup(snapshot.downloads);
+        setDownloads(sanitized);
+        setDarkMode(snapshot.darkMode);
+        setScheduleSettings(snapshot.schedule);
+        setFreeDownloadsRemaining(snapshot.freeDownloads);
+        setPurchasedCoins(snapshot.purchasedCoins);
+        setIsUnlimited(snapshot.isUnlimited);
+        setUnlimitedExpiry(storageService.getUnlimitedExpiryFormatted() || undefined);
+
+        const restoreRes = await billingService.restorePurchases();
+        if (restoreRes.success && restoreRes.restoredSkus.length > 0 && isMounted) {
+          refreshBillingState();
+        }
+
+        // Auto-start any queued items if network is online
+        setTimeout(() => {
+          checkAndAdvanceQueue();
+        }, 800);
+      } catch (err) {
+        console.warn('Storage or billing bootstrap warning:', err);
+      }
+    };
+
+    bootstrapStorageAndPurchases();
+
+    // Listen to network status changes (disconnect / reconnect)
+    const unsubscribeNetwork = networkService.subscribe((online) => {
+      setIsOnline(online);
+      if (!online) {
+        // Automatically pause active downloads on disconnect
+        setDownloads((prev) =>
+          prev.map((d) => {
+            if (d.status === 'downloading') {
+              ytDlpService.pauseDownload(d.id);
+              return {
+                ...d,
+                status: 'paused',
+                speed: 0,
+                eta: 'اینترنت قطع شد - در انتظار اتصال مجدد...',
+              };
+            }
+            return d;
+          })
+        );
+      } else {
+        // Automatically resume when connection returns
+        setTimeout(() => {
+          checkAndAdvanceQueue();
+        }, 1000);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      unsubscribeNetwork();
+    };
+  }, []);
 
   const [activeMainTab, setActiveMainTab] = useState<'active' | 'completed' | 'schedule'>('active');
   const [selectedCategory, setSelectedCategory] = useState<DownloadCategory>('all');
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
   const [isCoinShopOpen, setIsCoinShopOpen] = useState<boolean>(false);
   const [undoNotification, setUndoNotification] = useState<UndoNotification | null>(null);
-  const [isCurrentlyInScheduleWindow, setIsCurrentlyInScheduleWindow] = useState<boolean>(false);
+  const [isCurrentlyInScheduleWindow, setIsCurrentlyInScheduleWindow] = useState<boolean>(() => {
+    return downloadQueueManager.isInsideScheduleWindow(storageService.getSchedule());
+  });
 
-  // Sync dark mode class with HTML document
+  // Sync dark mode class with HTML document and persistent Preferences
   useEffect(() => {
-    try {
-      localStorage.setItem(DARK_MODE_KEY, JSON.stringify(darkMode));
-    } catch (e) {}
+    storageService.setDarkMode(darkMode);
 
     const root = document.documentElement;
     if (darkMode) {
@@ -99,143 +159,165 @@ export default function App() {
     }
   }, [darkMode]);
 
-  // Persist downloads to localStorage
+  // Persist downloads to Capacitor Preferences
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(downloads));
-    } catch (e) {
-      console.error('Failed to save downloads', e);
-    }
+    storageService.setDownloads(downloads);
   }, [downloads]);
 
-  // Persist schedule to localStorage
+  // Persist schedule to Capacitor Preferences
   useEffect(() => {
-    try {
-      localStorage.setItem(SCHEDULE_KEY, JSON.stringify(scheduleSettings));
-    } catch (e) {}
+    storageService.setSchedule(scheduleSettings);
   }, [scheduleSettings]);
 
-  // Persist user coins & downloads status
-  useEffect(() => {
-    try {
-      localStorage.setItem(FREE_DOWNLOADS_KEY, JSON.stringify(freeDownloadsRemaining));
-      localStorage.setItem(PURCHASED_COINS_KEY, JSON.stringify(purchasedCoins));
-      localStorage.setItem(UNLIMITED_KEY, JSON.stringify(isUnlimited));
-    } catch (e) {}
-  }, [freeDownloadsRemaining, purchasedCoins, isUnlimited]);
+  // Start real download with progress and automatic queue advancement on completion
+  const startRealDownload = (item: DownloadItem) => {
+    ytDlpService.startDownload(item, (event) => {
+      setDownloads((prev) =>
+        prev.map((d) => {
+          if (d.id !== event.downloadId) return d;
+          return {
+            ...d,
+            progress: event.progress,
+            downloadedSize: event.downloadedBytes,
+            fileSize: event.totalBytes > 0 ? event.totalBytes : d.fileSize,
+            speed: event.speed,
+            connections: event.connections || 4,
+            eta: event.eta,
+            status: event.status,
+            localPath: event.localPath || d.localPath,
+            errorMessage: event.error,
+          };
+        })
+      );
+
+      // When a download completes or errors, immediately advance the queue
+      if (event.status === 'completed' || event.status === 'error') {
+        setTimeout(() => {
+          checkAndAdvanceQueue();
+        }, 300);
+      }
+    }).catch((err) => {
+      setDownloads((prev) =>
+        prev.map((d) => {
+          if (d.id !== item.id) return d;
+          return {
+            ...d,
+            status: 'error',
+            speed: 0,
+            eta: 'خطا در دانلود',
+            errorMessage: err.message,
+          };
+        })
+      );
+
+      setTimeout(() => {
+        checkAndAdvanceQueue();
+      }, 300);
+    });
+  };
+
+  // Check queue and advance queued items up to max concurrent limit
+  const checkAndAdvanceQueue = () => {
+    const currentList = downloadsRef.current;
+    const schedule = scheduleRef.current;
+
+    const { updatedDownloads, itemsToStart, itemsToPause } = downloadQueueManager.evaluateQueue(
+      currentList,
+      schedule
+    );
+
+    // Pause items that should not run
+    itemsToPause.forEach((id) => {
+      ytDlpService.pauseDownload(id);
+    });
+
+    if (itemsToStart.length > 0 || itemsToPause.length > 0) {
+      setDownloads(updatedDownloads);
+      itemsToStart.forEach((item) => {
+        startRealDownload(item);
+      });
+    }
+  };
 
   // Schedule time window checker & auto start/stop
   useEffect(() => {
-    const checkWindow = () => {
-      if (!scheduleSettings.enabled) {
-        setIsCurrentlyInScheduleWindow(false);
-        return;
-      }
-      const now = new Date();
-      const currentH = now.getHours().toString().padStart(2, '0');
-      const currentM = now.getMinutes().toString().padStart(2, '0');
-      const currentTimeStr = `${currentH}:${currentM}`;
-
-      const { startTime, endTime } = scheduleSettings;
-      let inWindow = false;
-      if (startTime <= endTime) {
-        inWindow = currentTimeStr >= startTime && currentTimeStr <= endTime;
-      } else {
-        inWindow = currentTimeStr >= startTime || currentTimeStr <= endTime;
-      }
-
+    const checkSchedule = () => {
+      const schedule = scheduleRef.current;
+      const inWindow = downloadQueueManager.isInsideScheduleWindow(schedule);
       setIsCurrentlyInScheduleWindow(inWindow);
 
-      if (scheduleSettings.enabled) {
-        setDownloads((prev) =>
-          prev.map((item) => {
-            if (inWindow) {
-              if (item.status === 'paused' && (item.eta.includes('متوقف') || item.eta.includes('زمان‌بند'))) {
-                return { ...item, status: 'downloading', speed: 2097152, eta: 'در حال دانلود (تایمر خودکار)' };
-              }
-            } else {
-              if (item.status === 'downloading') {
-                return { ...item, status: 'paused', speed: 0, eta: 'متوقف‌شده توسط زمان‌بند' };
-              }
-            }
-            return item;
-          })
-        );
+      if (schedule.enabled) {
+        checkAndAdvanceQueue();
       }
     };
 
-    checkWindow();
-    const timer = setInterval(checkWindow, 15000);
+    checkSchedule();
+    const timer = setInterval(checkSchedule, 10000);
     return () => clearInterval(timer);
   }, [scheduleSettings.enabled, scheduleSettings.startTime, scheduleSettings.endTime]);
 
-  // Real-time download simulation loop
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setDownloads((prev) => {
-        const updated = prev.map((item) => {
-          if (item.status !== 'downloading') return item;
-
-          const increment = Math.floor(Math.random() * 2097152) + 1048576; // 1MB to 3MB per tick
-          const newDownloaded = Math.min(item.fileSize, item.downloadedSize + increment);
-          const newProgress = Math.floor((newDownloaded / item.fileSize) * 100);
-
-          if (newDownloaded >= item.fileSize) {
-            return {
-              ...item,
-              downloadedSize: item.fileSize,
-              progress: 100,
-              speed: 0,
-              status: 'completed' as DownloadStatus,
-              eta: 'تکمیل شده',
-            };
-          }
-
-          const remainingBytes = item.fileSize - newDownloaded;
-          const secondsLeft = Math.ceil(remainingBytes / item.speed);
-          const etaText = secondsLeft < 60 ? `${secondsLeft} ثانیه مانده` : `${Math.ceil(secondsLeft / 60)} دقیقه مانده`;
-
-          return {
-            ...item,
-            downloadedSize: newDownloaded,
-            progress: newProgress,
-            eta: etaText,
-          };
-        });
-
-        return updated;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, []);
-
   // Handlers
-  const handlePauseResume = (id: string) => {
-    setDownloads((prev) =>
-      prev.map((item) => {
-        if (item.id !== id) return item;
-        if (item.status === 'downloading') {
-          return { ...item, status: 'paused', speed: 0, eta: 'متوقف شده' };
-        }
-        if (item.status === 'paused' || item.status === 'error') {
-          return { ...item, status: 'downloading', speed: 2097152, eta: 'در حال محاسبه...' };
-        }
-        return item;
-      })
-    );
+  const handlePauseResume = async (id: string) => {
+    const item = downloads.find((d) => d.id === id);
+    if (!item) return;
+
+    if (item.status === 'downloading') {
+      await ytDlpService.pauseDownload(id);
+      setDownloads((prev) =>
+        prev.map((d) => (d.id === id ? { ...d, status: 'paused', speed: 0, eta: 'متوقف شده' } : d))
+      );
+      // Let next queued item start
+      setTimeout(() => checkAndAdvanceQueue(), 200);
+    } else if (item.status === 'paused' || item.status === 'queued') {
+      // Check schedule window
+      if (scheduleSettings.enabled && !isCurrentlyInScheduleWindow) {
+        setScheduleNotice(`زمان‌بند فعال است. دانلودها بین ساعت ${scheduleSettings.startTime} تا ${scheduleSettings.endTime} خودکار شروع می‌شوند.`);
+        setTimeout(() => setScheduleNotice(null), 4000);
+        return;
+      }
+
+      // Check concurrent limit
+      const activeCount = downloads.filter((d) => d.status === 'downloading').length;
+      if (activeCount >= concurrentLimit) {
+        // Enqueue with top priority
+        setDownloads((prev) =>
+          prev.map((d) => (d.id === id ? { ...d, status: 'queued', eta: 'در صف انتظار (در نوبت بعدی)' } : d))
+        );
+      } else {
+        setDownloads((prev) =>
+          prev.map((d) => (d.id === id ? { ...d, status: 'downloading', eta: 'در حال شروع دانلود...' } : d))
+        );
+        startRealDownload({ ...item, status: 'downloading' });
+      }
+    }
   };
 
   const handleRetry = (id: string) => {
-    setDownloads((prev) =>
-      prev.map((item) => {
-        if (item.id !== id) return item;
-        return { ...item, status: 'downloading', speed: 2097152, eta: 'در حال شروع...' };
-      })
-    );
+    const item = downloads.find((d) => d.id === id);
+    if (!item) return;
+
+    if (scheduleSettings.enabled && !isCurrentlyInScheduleWindow) {
+      setDownloads((prev) =>
+        prev.map((d) => (d.id === id ? { ...d, status: 'queued', speed: 0, eta: `در انتظار زمان‌بند (${scheduleSettings.startTime})`, errorMessage: undefined } : d))
+      );
+      return;
+    }
+
+    const activeCount = downloads.filter((d) => d.status === 'downloading').length;
+    if (activeCount >= concurrentLimit) {
+      setDownloads((prev) =>
+        prev.map((d) => (d.id === id ? { ...d, status: 'queued', speed: 0, eta: 'در صف انتظار برای تلاش مجدد', errorMessage: undefined } : d))
+      );
+    } else {
+      setDownloads((prev) =>
+        prev.map((d) => (d.id === id ? { ...d, status: 'downloading', speed: 0, eta: 'در حال شروع مجدد...', errorMessage: undefined } : d))
+      );
+      startRealDownload({ ...item, status: 'downloading' });
+    }
   };
 
-  const handleCancelDelete = (itemToCancel: DownloadItem) => {
+  const handleCancelDelete = async (itemToCancel: DownloadItem) => {
+    await ytDlpService.cancelDownload(itemToCancel.id);
     setDownloads((prev) => prev.filter((d) => d.id !== itemToCancel.id));
     setUndoNotification({
       id: uuidv4(),
@@ -243,36 +325,42 @@ export default function App() {
       item: itemToCancel,
       timestamp: Date.now(),
     });
+    // Slot freed, advance queue
+    setTimeout(() => checkAndAdvanceQueue(), 200);
   };
 
   const handleUndo = (itemToRestore: DownloadItem) => {
     setDownloads((prev) => [itemToRestore, ...prev]);
     setUndoNotification(null);
+    if (itemToRestore.status === 'downloading') {
+      startRealDownload(itemToRestore);
+    } else {
+      setTimeout(() => checkAndAdvanceQueue(), 200);
+    }
   };
 
-  const handleAddDownload = (url: string, name: string, category: DownloadCategory, fileSize: number) => {
-    if (!isUnlimited) {
-      if (freeDownloadsRemaining > 0) {
-        setFreeDownloadsRemaining((prev) => prev - 1);
-      } else if (purchasedCoins > 0) {
-        setPurchasedCoins((prev) => prev - 1);
-      } else {
-        setIsCoinShopOpen(true);
-        alert('موجودی دانلود رایگان ماهانه و سکه‌های شما به پایان رسیده است. لطفاً بسته خرید سکه یا اشتراک تهیه کنید.');
-        return;
-      }
+  const handleAddDownload = async (opts: AddDownloadOptions) => {
+    const quota = await storageService.consumeQuota();
+    if (!quota.allowed) {
+      setIsCoinShopOpen(true);
+      return;
     }
+
+    setFreeDownloadsRemaining(quota.remainingFree);
+    setPurchasedCoins(quota.remainingCoins);
+
+    const initialStatus = downloadQueueManager.getInitialStatusForNewDownload(downloads, scheduleSettings);
 
     const newItem: DownloadItem = {
       id: uuidv4(),
-      name,
-      url,
-      category,
-      fileSize,
+      name: opts.name,
+      url: opts.url,
+      category: opts.category,
+      fileSize: opts.fileSize,
       downloadedSize: 0,
       progress: 0,
-      speed: 3145728, // 3MB/s
-      status: scheduleSettings.enabled && !isCurrentlyInScheduleWindow ? 'paused' : 'downloading',
+      speed: 0,
+      status: initialStatus.status,
       createdAt: new Date().toLocaleDateString('fa-IR', {
         year: 'numeric',
         month: '2-digit',
@@ -280,42 +368,21 @@ export default function App() {
         hour: '2-digit',
         minute: '2-digit',
       }),
-      eta: scheduleSettings.enabled && !isCurrentlyInScheduleWindow ? 'متوقف‌شده توسط زمان‌بند' : 'محاسبه زمان...',
+      eta: initialStatus.eta,
+      thumbnail: opts.thumbnail,
+      formatId: opts.formatId,
+      audioOnly: opts.audioOnly,
+      extractor: opts.extractor,
+      duration: opts.duration,
+      connections: 4,
+      queuePosition: initialStatus.queuePosition,
     };
 
     setDownloads((prev) => [newItem, ...prev]);
-  };
 
-  const handleBuyPackage = async (type: 'coins_10' | 'coins_30' | 'unlimited_1m' | 'unlimited_3m' | 'unlimited') => {
-    let sku: string = PRODUCT_SKUS.COINS_10;
-    if (type === 'coins_30') sku = PRODUCT_SKUS.COINS_30;
-    else if (type === 'unlimited_1m') sku = PRODUCT_SKUS.UNLIMITED_1M;
-    else if (type === 'unlimited_3m') sku = PRODUCT_SKUS.UNLIMITED_3M;
-    else if (type === 'unlimited') sku = PRODUCT_SKUS.UNLIMITED_1Y;
-
-    const result = await billingService.purchase(sku);
-    if (!result.success) {
-      alert(result.error || 'خرید ناموفق بود.');
-      return;
+    if (initialStatus.status === 'downloading') {
+      startRealDownload(newItem);
     }
-
-    if (type === 'coins_10') {
-      setPurchasedCoins((prev) => prev + 10);
-      alert('بسته ۱۰ تایی (۷۹,۰۰۰ تومان) با موفقیت خریداری شد و ۱۰ دانلود به حساب شما اضافه گردید!');
-    } else if (type === 'coins_30') {
-      setPurchasedCoins((prev) => prev + 30);
-      alert('بسته ۳۰ تایی (۱۷۹,۰۰۰ تومان) با موفقیت خریداری شد و ۳۰ دانلود به حساب شما اضافه گردید!');
-    } else if (type === 'unlimited_1m') {
-      setIsUnlimited(true);
-      alert('اشتراک ۱ ماهه نامحدود (۸۹,۰۰۰ تومان) با موفقیت فعال شد! اکنون به مدت ۳۰ روز می‌توانید به صورت نامحدود دانلود کنید.');
-    } else if (type === 'unlimited_3m') {
-      setIsUnlimited(true);
-      alert('اشتراک ۳ ماهه نامحدود (۱۹۹,۰۰۰ تومان) با موفقیت فعال شد! اکنون به مدت ۹۰ روز می‌توانید به صورت نامحدود دانلود کنید.');
-    } else if (type === 'unlimited') {
-      setIsUnlimited(true);
-      alert('اشتراک یکساله نامحدود (۳۹۹,۰۰۰ تومان) با موفقیت فعال شد! اکنون می‌توانید به صورت نامحدود دانلود کنید.');
-    }
-    setIsCoinShopOpen(false);
   };
 
   const handleClearCompleted = () => {
@@ -352,6 +419,22 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-['Vazirmatn',sans-serif] transition-colors duration-200 pb-24">
       
+      {/* Offline Alert Banner */}
+      {!isOnline && (
+        <div className="bg-amber-500/15 border-b border-amber-500/30 text-amber-800 dark:text-amber-300 py-2.5 px-4 text-xs flex items-center justify-center gap-2 font-medium">
+          <WifiOff className="w-4 h-4 shrink-0 text-amber-500 animate-pulse" />
+          <span>اتصال اینترنت قطع شده است. دانلودهای فعال متوقف شدند و به محض برقراری اتصال خودکار ادامه خواهند یافت.</span>
+        </div>
+      )}
+
+      {/* Schedule Warning Banner */}
+      {scheduleNotice && (
+        <div className="bg-blue-500/15 border-b border-blue-500/30 text-blue-800 dark:text-blue-300 py-2.5 px-4 text-xs flex items-center justify-center gap-2 font-medium animate-fade-in">
+          <AlertTriangle className="w-4 h-4 shrink-0 text-blue-500" />
+          <span>{scheduleNotice}</span>
+        </div>
+      )}
+
       {/* Header */}
       <Header
         darkMode={darkMode}
@@ -364,6 +447,7 @@ export default function App() {
         freeDownloadsRemaining={freeDownloadsRemaining}
         purchasedCoins={purchasedCoins}
         isUnlimited={isUnlimited}
+        unlimitedExpiry={unlimitedExpiry}
       />
 
       {/* Main Content Container */}
@@ -389,7 +473,7 @@ export default function App() {
               <div className="flex items-center justify-between">
                 <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
                   <FolderOpen className="w-5 h-5 text-blue-600" />
-                  <span>{activeMainTab === 'completed' ? 'فایل‌های دانلود شده' : 'صف دانلود و در حال انجام'}</span>
+                  <span>{activeMainTab === 'completed' ? 'فایل‌های دانلود شده' : 'صف دانلود واقعی چنداتصاله (yt-dlp)'}</span>
                   <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
                     {sortedDownloads.length}
                   </span>
@@ -403,10 +487,10 @@ export default function App() {
                   </div>
                   <div className="space-y-1 max-w-sm mx-auto">
                     <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-                      {activeMainTab === 'completed' ? 'هیچ فایل دانلود‌شده‌ای وجود ندارد' : 'هیچ دانلود فعالی در صف نیست'}
+                      {activeMainTab === 'completed' ? 'هیچ فایل دانلود‌شده‌ای وجود ندارد' : 'هیچ دانلودی در صف نیست'}
                     </h3>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      {activeMainTab === 'completed' ? 'پس از اتمام دانلودها، فایل‌ها در این بخش قرار می‌گیرند.' : 'می‌توانید با کلیک روی افزودن لینک، دانلود جدیدی را شروع کنید.'}
+                      {activeMainTab === 'completed' ? 'پس از اتمام دانلودها، فایل‌ها در این بخش قرار می‌گیرند.' : 'می‌توانید با کلیک روی افزودن لینک، دانلود واقعی ویدیو یا فایل را با چند اتصال همزمان شروع کنید.'}
                     </p>
                   </div>
                   <button
@@ -437,6 +521,11 @@ export default function App() {
               schedule={scheduleSettings}
               setSchedule={setScheduleSettings}
               isCurrentlyInScheduleWindow={isCurrentlyInScheduleWindow}
+              concurrentLimit={concurrentLimit}
+              onConcurrentLimitChange={(limit) => {
+                setConcurrentLimit(limit);
+                downloadQueueManager.setMaxConcurrent(limit);
+              }}
             />
           </div>
         )}
@@ -446,11 +535,11 @@ export default function App() {
       {/* Footer */}
       <footer className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 py-4 text-center text-xs text-slate-500 dark:text-slate-400 transition-colors duration-200 mb-16">
         <div className="max-w-7xl mx-auto px-4 flex items-center justify-center">
-          <p>آندو دانلودر © 2026 - مدیر دانلود هوشمند</p>
+          <p>آندو دانلودر © 2026 - مجهز به موتور دانلود واقعی yt-dlp</p>
         </div>
       </footer>
 
-      {/* Bottom Sticky Tab Bar (3 Tabs for Clean UI) */}
+      {/* Bottom Sticky Tab Bar */}
       <nav aria-label="منوی پایین صفحه" className="fixed bottom-0 left-0 right-0 z-40 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 shadow-lg py-2 px-4">
         <div className="max-w-xl mx-auto grid grid-cols-3 gap-2">
           <button
@@ -508,7 +597,8 @@ export default function App() {
         freeDownloadsRemaining={freeDownloadsRemaining}
         purchasedCoins={purchasedCoins}
         isUnlimited={isUnlimited}
-        onBuyPackage={handleBuyPackage}
+        unlimitedExpiry={unlimitedExpiry}
+        onRefreshBillingState={refreshBillingState}
       />
 
       {/* Undo Snackbar Notification */}
@@ -521,4 +611,3 @@ export default function App() {
     </div>
   );
 }
-

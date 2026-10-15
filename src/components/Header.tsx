@@ -12,6 +12,7 @@ interface HeaderProps {
   freeDownloadsRemaining: number;
   purchasedCoins: number;
   isUnlimited: boolean;
+  unlimitedExpiry?: string;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -25,6 +26,7 @@ export const Header: React.FC<HeaderProps> = ({
   freeDownloadsRemaining,
   purchasedCoins,
   isUnlimited,
+  unlimitedExpiry,
 }) => {
   const [isUpdating, setIsUpdating] = useState(false);
 
@@ -90,7 +92,7 @@ export const Header: React.FC<HeaderProps> = ({
               <Coins className="w-4 h-4 text-amber-500" />
             )}
             <span>
-              {isUnlimited ? 'نامحدود ♾️' : `رایگان: ${freeDownloadsRemaining} | سکه: ${purchasedCoins}`}
+              {isUnlimited ? (unlimitedExpiry ? `نامحدود (تا ${unlimitedExpiry})` : 'نامحدود ♾️') : `رایگان: ${freeDownloadsRemaining} | سکه: ${purchasedCoins}`}
             </span>
           </button>
 

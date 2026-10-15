@@ -1,11 +1,11 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace "ir.eblaghyar.app"
+    namespace "com.undodownloadmanager.app"
     compileSdkVersion rootProject.ext.compileSdkVersion
 
     defaultConfig {
-        applicationId "com.yourcompany.appname"
+        applicationId "com.undodownloadmanager.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
@@ -21,18 +21,18 @@ android {
         }
     }
 
-    // ✅ بخش تنظیمات امضای دیجیتال (Signing Config)
+    // بخش تنظیمات امضای دیجیتال (Signing Config)
     signingConfigs {
         release {
-            def keystorePath = System.getenv("KEYSTORE_PATH") ?: "eblaghyar-release-key.jks"
+            def keystorePath = System.getenv("KEYSTORE_PATH") ?: "undodownloadmanager-release-key.jks"
             def storePass = System.getenv("KEYSTORE_PASSWORD")
             def keyAli = System.getenv("KEY_ALIAS")
             def keyPass = System.getenv("KEY_PASSWORD")
             
             storeFile file(keystorePath)
-            storePassword (storePass != null && !storePass.isEmpty() ? storePass : "eblaghyar123")
-            keyAlias (keyAli != null && !keyAli.isEmpty() ? keyAli : "eblaghyar-alias")
-            keyPassword (keyPass != null && !keyPass.isEmpty() ? keyPass : "eblaghyar123")
+            storePassword (storePass != null && !storePass.isEmpty() ? storePass : "undodownload123")
+            keyAlias (keyAli != null && !keyAli.isEmpty() ? keyAli : "undodownload-alias")
+            keyPassword (keyPass != null && !keyPass.isEmpty() ? keyPass : "undodownload123")
         }
     }
 
@@ -40,7 +40,6 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            // ✅ اتصال تنظیمات امضا به بیلد ریلیس
             signingConfig signingConfigs.release
         }
     }

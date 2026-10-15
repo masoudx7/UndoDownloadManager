@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.yourcompany.appname',
-  appName: 'نام برنامه جدید',
+  appId: 'com.undodownloadmanager.app',
+  appName: 'Undo Download Manager',
   webDir: 'dist',
   server: {
     androidScheme: 'https',

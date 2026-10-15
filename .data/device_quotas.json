@@ -1,0 +1,23 @@
+{
+  "test-device-123": {
+    "freeDownloadsRemaining": 4,
+    "isUnlimited": false,
+    "unlimitedExpiry": null,
+    "firstSeenAt": 1792059801967,
+    "lastActiveAt": 1792059805074
+  },
+  "b9d28db3-9e6b-4edc-897d-f825ef77a435": {
+    "freeDownloadsRemaining": 5,
+    "isUnlimited": false,
+    "unlimitedExpiry": null,
+    "firstSeenAt": 1792059854056,
+    "lastActiveAt": 1792059854056
+  },
+  "anonymous_default": {
+    "freeDownloadsRemaining": 5,
+    "isUnlimited": false,
+    "unlimitedExpiry": null,
+    "firstSeenAt": 1792060457141,
+    "lastActiveAt": 1792060457141
+  }
+}

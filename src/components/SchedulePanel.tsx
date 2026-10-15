@@ -7,12 +7,16 @@ interface SchedulePanelProps {
   schedule: ScheduleSettings;
   setSchedule: React.Dispatch<React.SetStateAction<ScheduleSettings>>;
   isCurrentlyInScheduleWindow: boolean;
+  concurrentLimit?: number;
+  onConcurrentLimitChange?: (limit: number) => void;
 }
 
 export const SchedulePanel: React.FC<SchedulePanelProps> = ({
   schedule,
   setSchedule,
   isCurrentlyInScheduleWindow,
+  concurrentLimit = 2,
+  onConcurrentLimitChange,
 }) => {
   const [folderStatus, setFolderStatus] = useState<string | null>(null);
   const [isInitializingFolders, setIsInitializingFolders] = useState<boolean>(false);
@@ -158,6 +162,38 @@ export const SchedulePanel: React.FC<SchedulePanelProps> = ({
             </div>
           </div>
 
+        </div>
+
+        {/* Concurrent Downloads Limit Selector */}
+        <div className="mt-6 pt-5 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <span>محدودیت دانلودهای همزمان (Concurrent Queue)</span>
+              <span className="text-[10px] px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-semibold font-mono">
+                {concurrentLimit} دانلود فعال
+              </span>
+            </h4>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              دانلودهای بیشتر در صف انتظار قرار گرفته و با پایان هر دانلود، نوبت بعدی خودکار شروع می‌شود.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-1.5 self-end sm:self-auto bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+            {[1, 2, 3, 4, 5].map((num) => (
+              <button
+                key={num}
+                type="button"
+                onClick={() => onConcurrentLimitChange && onConcurrentLimitChange(num)}
+                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer ${
+                  concurrentLimit === num
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                {num}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
