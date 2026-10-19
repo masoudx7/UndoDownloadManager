@@ -1,5 +1,5 @@
 import { Capacitor } from '@capacitor/core';
-import { DownloadItem, YtDlpMediaInfo, YtDlpProgressEvent, YtDlpFormat } from '../types';
+import { DownloadItem, YtDlpMediaInfo, YtDlpProgressEvent } from '../types';
 import { notificationService } from './notificationService';
 import { fileManagerService } from './fileManagerService';
 import { formatSpeed } from '../utils/formatters';
@@ -14,7 +14,6 @@ export interface YtDlpDownloadRequest {
 
 class YtDlpService {
   private activeStreams: Map<string, EventSource> = new Map();
-  private abortControllers: Map<string, AbortController> = new Map();
   private isNative: boolean = false;
 
   constructor() {
@@ -29,7 +28,9 @@ class YtDlpService {
   }
 
   /**
-   * Extract video / audio info, thumbnail, duration, and formats using yt-dlp
+   * Extract video / audio info, thumbnail, duration, and formats using yt-dlp.
+   * On native Android, relies strictly on the packaged local YtDlpPlugin (fully offline & independent).
+   * On Web/development, uses the backend API endpoint.
    */
   public async extractInfo(url: string): Promise<YtDlpMediaInfo> {
     const cleanUrl = url.trim();
@@ -37,44 +38,60 @@ class YtDlpService {
       throw new Error('لطفاً آدرس اینترنتی معتبر وارد کنید.');
     }
 
-    // If native Capacitor plugin is registered
     const win = window as any;
-    if (this.isNative && win.Capacitor?.Plugins?.YtDlp) {
-      try {
-        const res = await win.Capacitor.Plugins.YtDlp.extractInfo({ url: cleanUrl });
-        if (res && res.mediaInfo) {
-          return res.mediaInfo;
+
+    // 1. Native Android Path: strictly use local YtDlpPlugin
+    if (this.isNative) {
+      if (win.Capacitor?.Plugins?.YtDlp) {
+        try {
+          const res = await win.Capacitor.Plugins.YtDlp.extractInfo({ url: cleanUrl });
+          if (res && res.mediaInfo) {
+            return res.mediaInfo;
+          }
+          throw new Error('اطلاعاتی از پلاگین بومی دریافت نشد.');
+        } catch (nativeErr: any) {
+          console.error('Native YtDlp plugin extraction error:', nativeErr);
+          throw new Error(this.formatErrorMessage(nativeErr.message || 'خطا در استخراج اطلاعات بومی. لطفاً لینک را بررسی کنید.'));
         }
-      } catch (nativeErr: any) {
-        console.warn('Native YtDlp plugin extraction failed, falling back to backend:', nativeErr);
+      } else {
+        throw new Error('پلاگین بومی YtDlp در این دستگاه بارگذاری نشده است.');
       }
     }
 
-    // Call backend API /api/ytdlp/extract
-    const response = await fetch('/api/ytdlp/extract', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ url: cleanUrl }),
-    });
+    // 2. Web / Development Path: call backend API /api/ytdlp/extract
+    try {
+      const response = await fetch('/api/ytdlp/extract', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ url: cleanUrl }),
+      });
 
-    if (!response.ok) {
-      const errData = await response.json().catch(() => ({}));
-      const errorMsg = errData.error || `خطا در استخراج اطلاعات (کد وضعیت: ${response.status})`;
-      throw new Error(this.formatErrorMessage(errorMsg));
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        const errorMsg = errData.error || `خطا در استخراج اطلاعات (کد وضعیت: ${response.status})`;
+        throw new Error(this.formatErrorMessage(errorMsg));
+      }
+
+      const data = await response.json();
+      if (!data.success || !data.mediaInfo) {
+        throw new Error(this.formatErrorMessage(data.error || 'اطلاعات ویدیو یافت نشد.'));
+      }
+
+      return data.mediaInfo;
+    } catch (fetchErr: any) {
+      if (fetchErr.message && fetchErr.message.includes('خطا')) {
+        throw fetchErr;
+      }
+      throw new Error('ارتباط با سرور محلی برقرار نشد. لطفاً از اجرای سرور بک‌اند مطمئن شوید یا نسخه اندروید را نصب کنید.');
     }
-
-    const data = await response.json();
-    if (!data.success || !data.mediaInfo) {
-      throw new Error(this.formatErrorMessage(data.error || 'اطلاعات ویدیو یافت نشد.'));
-    }
-
-    return data.mediaInfo;
   }
 
   /**
-   * Start real download using yt-dlp / progressive multi-connection engine with real-time progress events
+   * Start real download using yt-dlp / native plugin or Web SSE.
+   * On native Android, uses local YtDlpPlugin process execution with real-time events.
+   * On Web, uses Server-Sent Events (SSE).
    */
   public startDownload(
     item: DownloadItem,
@@ -83,54 +100,59 @@ class YtDlpService {
     return new Promise((resolve, reject) => {
       const { id, url, name, formatId, audioOnly } = item;
 
-      // Close previous stream for same id if exists
+      // Close previous stream or task for same id if exists
       this.cancelDownload(id);
 
       const win = window as any;
 
-      // 1. If Native Android with Capacitor Plugin
-      if (this.isNative && win.Capacitor?.Plugins?.YtDlp) {
-        const plugin = win.Capacitor.Plugins.YtDlp;
+      // 1. Native Android Path: strictly use Capacitor Plugin
+      if (this.isNative) {
+        if (win.Capacitor?.Plugins?.YtDlp) {
+          const plugin = win.Capacitor.Plugins.YtDlp;
 
-        const progressListener = plugin.addListener('onProgress', async (event: YtDlpProgressEvent) => {
-          if (event.downloadId === id) {
-            onProgress(event);
-            if (event.status === 'downloading') {
-              notificationService.notifyProgress(
-                id,
-                name,
-                event.progress,
-                formatSpeed(event.speed),
-                event.eta
-              );
-            } else if (event.status === 'completed') {
-              progressListener.remove();
-              await notificationService.notifyCompleted(id, name);
-              await fileManagerService.organizeCompletedFile({ ...item, localPath: event.localPath });
-              resolve({ success: true, localPath: event.localPath });
-            } else if (event.status === 'error') {
-              progressListener.remove();
-              notificationService.notifyError(id, name, event.error);
-              reject(new Error(event.error || 'خطا در دانلود بومی'));
+          const progressListener = plugin.addListener('onProgress', async (event: YtDlpProgressEvent) => {
+            if (event.downloadId === id) {
+              onProgress(event);
+              if (event.status === 'downloading') {
+                notificationService.notifyProgress(
+                  id,
+                  name,
+                  event.progress,
+                  formatSpeed(event.speed),
+                  event.eta
+                );
+              } else if (event.status === 'completed') {
+                progressListener.remove();
+                await notificationService.notifyCompleted(id, name);
+                await fileManagerService.organizeCompletedFile({ ...item, localPath: event.localPath });
+                resolve({ success: true, localPath: event.localPath });
+              } else if (event.status === 'error') {
+                progressListener.remove();
+                notificationService.notifyError(id, name, event.error);
+                reject(new Error(event.error || 'خطا در دانلود بومی'));
+              }
             }
-          }
-        });
+          });
 
-        plugin.startDownload({
-          id,
-          url,
-          filename: name,
-          formatId: formatId || 'best',
-          audioOnly: !!audioOnly,
-        }).catch((err: any) => {
-          progressListener.remove();
-          reject(err);
-        });
+          plugin.startDownload({
+            id,
+            url,
+            filename: name,
+            formatId: formatId || 'best',
+            audioOnly: !!audioOnly,
+          }).catch((err: any) => {
+            progressListener.remove();
+            reject(err);
+          });
 
-        return;
+          return;
+        } else {
+          reject(new Error('پلاگین بومی YtDlp روی این دستگاه در دسترس نیست.'));
+          return;
+        }
       }
 
-      // 2. Web / Local Engine Mode: Real Server-Sent Events (SSE) Stream
+      // 2. Web / Development Path: Real Server-Sent Events (SSE) Stream
       const queryParams = new URLSearchParams({
         id,
         url,
@@ -140,8 +162,15 @@ class YtDlpService {
       });
 
       const sseUrl = `/api/ytdlp/stream?${queryParams.toString()}`;
-      const eventSource = new EventSource(sseUrl);
-      this.activeStreams.set(id, eventSource);
+      let eventSource: EventSource;
+
+      try {
+        eventSource = new EventSource(sseUrl);
+        this.activeStreams.set(id, eventSource);
+      } catch (err: any) {
+        reject(new Error('ناتوان در ایجاد اتصال SSE با سرور.'));
+        return;
+      }
 
       eventSource.onmessage = async (e) => {
         try {
@@ -177,7 +206,7 @@ class YtDlpService {
       eventSource.onerror = (err) => {
         console.error('SSE Stream error for download:', id, err);
         this.cleanupStream(id);
-        const friendlyError = 'ارتباط با موتور دانلود قطع شد یا اتصال اینترنت متوقف گردید.';
+        const friendlyError = 'ارتباط با موتور دانلود قطع شد یا سرور در دسترس نیست.';
         notificationService.notifyError(id, name, friendlyError);
         onProgress({
           downloadId: id,
@@ -207,20 +236,25 @@ class YtDlpService {
         return true;
       } catch (e) {
         console.error('Native pause error:', e);
+        return false;
       }
     }
 
-    try {
-      await fetch('/api/ytdlp/pause', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: downloadId }),
-      });
-      return true;
-    } catch (e) {
-      console.warn('Pause API call error:', e);
-      return false;
+    if (!this.isNative) {
+      try {
+        await fetch('/api/ytdlp/pause', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: downloadId }),
+        });
+        return true;
+      } catch (e) {
+        console.warn('Pause API call error:', e);
+        return false;
+      }
     }
+
+    return false;
   }
 
   /**
@@ -237,10 +271,10 @@ class YtDlpService {
         return true;
       } catch (e) {
         console.error('Native resume error:', e);
+        return false;
       }
     }
 
-    // In web/server mode, starting the download with yt-dlp automatically uses `-c` (continue)
     try {
       this.startDownload(item, onProgress);
       return true;
@@ -263,20 +297,25 @@ class YtDlpService {
         return true;
       } catch (e) {
         console.error('Native cancel error:', e);
+        return false;
       }
     }
 
-    try {
-      await fetch('/api/ytdlp/cancel', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: downloadId }),
-      });
-      return true;
-    } catch (e) {
-      console.warn('Cancel API call error:', e);
-      return false;
+    if (!this.isNative) {
+      try {
+        await fetch('/api/ytdlp/cancel', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: downloadId }),
+        });
+        return true;
+      } catch (e) {
+        console.warn('Cancel API call error:', e);
+        return false;
+      }
     }
+
+    return false;
   }
 
   /**
@@ -297,7 +336,7 @@ class YtDlpService {
   private formatErrorMessage(error: string): string {
     const lower = error.toLowerCase();
     if (lower.includes('age-restricted') || lower.includes('sign in to confirm your age')) {
-      return 'این ویدیو دارای محدودیت سنی (Age-Restricted) است و نیاز به ورود دارد.';
+      return 'این ویدیو دارای محدودیت سنی (Age-Restricted) است.';
     }
     if (lower.includes('private video') || lower.includes('this video is private')) {
       return 'این ویدیو خصوصی (Private) است و امکان دانلود آن وجود ندارد.';
@@ -312,7 +351,7 @@ class YtDlpService {
       return 'فرمت این آدرس اینترنتی توسط yt-dlp پشتیبانی نمی‌شود.';
     }
     if (lower.includes('timeout') || lower.includes('network') || lower.includes('connection')) {
-      return 'خطا در ارتباط با سرور مبدأ یا قطعی اینترنت رخ داده است.';
+      return 'خطا در ارتباط با سرور یا قطعی اینترنت رخ داده است.';
     }
     return error;
   }
