@@ -18,6 +18,7 @@ android {
         ]
         aaptOptions {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+            noCompress 'yt-dlp', 'ffmpeg'
         }
     }
 
