@@ -11,13 +11,15 @@ android {
         versionCode 1
         versionName "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        
         manifestPlaceholders = [
             marketApplicationId: "ir.mservices.market",
             marketBindAddress: "ir.mservices.market",
             marketPermission: "ir.mservices.market.permission.PAYMENT"
         ]
+
         aaptOptions {
-            ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+            ignoreAssetsPattern '!.svn:!.git:!.ds_store:!\*.scc:.\*:!CVS:!thumbs.db:!picasa.ini:!\*~'
             noCompress 'yt-dlp', 'ffmpeg'
         }
     }
@@ -29,7 +31,7 @@ android {
             def storePass = System.getenv("KEYSTORE_PASSWORD")
             def keyAli = System.getenv("KEY_ALIAS")
             def keyPass = System.getenv("KEY_PASSWORD")
-            
+
             storeFile file(keystorePath)
             storePassword (storePass != null && !storePass.isEmpty() ? storePass : "undodownload123")
             keyAlias (keyAli != null && !keyAli.isEmpty() ? keyAli : "undodownload-alias")
@@ -43,6 +45,16 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
             signingConfig signingConfigs.release
         }
+    }
+
+    // =================================================================
+    // اضافه شده برای حل مشکل Duplicate Class بین Poolakey و Myket
+    // =================================================================
+    packagingOptions {
+        exclude 'com/android/vending/billing/IInAppBillingService.class'
+        exclude 'com/android/vending/billing/IInAppBillingService$Default.class'
+        exclude 'com/android/vending/billing/IInAppBillingService$Stub.class'
+        exclude 'com/android/vending/billing/IInAppBillingService$Stub$Proxy.class'
     }
 }
 
@@ -58,9 +70,11 @@ dependencies {
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
+    
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    
     implementation project(':capacitor-cordova-android-plugins')
 }
 
