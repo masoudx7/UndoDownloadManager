@@ -8,3 +8,7 @@ node_modules/
 
 # Build output
 dist/
+
+# Native binaries
+android/app/src/main/assets/bin/yt-dlp
+android/app/src/main/assets/bin/ffmpeg

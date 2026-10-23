@@ -30,5 +30,8 @@ jobs:
     - name: Type Check & Lint
       run: npm run lint
 
+    - name: Download Native Binaries (yt-dlp & ffmpeg)
+      run: npm run download-binaries
+
     - name: Build Application
       run: npm run build

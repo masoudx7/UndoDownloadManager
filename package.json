@@ -9,8 +9,9 @@
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
+    "download-binaries": "bash scripts/download-binaries.sh",
     "cap:sync": "npx cap sync android",
-    "build:android": "vite build && npx cap sync android",
+    "build:android": "npm run download-binaries && vite build && npx cap sync android",
     "cap:open:android": "npx cap open android"
   },
   "dependencies": {
