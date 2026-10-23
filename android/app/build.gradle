@@ -46,11 +46,14 @@ android {
         }
     }
 
+    // ==========================================================
+    // حل قطعی مشکل تداخل کلاس‌های بازار و مایکت با pickFirst
+    // ==========================================================
     packagingOptions {
-        exclude 'com/android/vending/billing/IInAppBillingService.class'
-        exclude 'com/android/vending/billing/IInAppBillingService$Default.class'
-        exclude 'com/android/vending/billing/IInAppBillingService$Stub.class'
-        exclude 'com/android/vending/billing/IInAppBillingService$Stub$Proxy.class'
+        pickFirst 'com/android/vending/billing/IInAppBillingService.class'
+        pickFirst 'com/android/vending/billing/IInAppBillingService$Default.class'
+        pickFirst 'com/android/vending/billing/IInAppBillingService$Stub.class'
+        pickFirst 'com/android/vending/billing/IInAppBillingService$Stub$Proxy.class'
     }
 }
 
