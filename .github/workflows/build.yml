@@ -41,17 +41,14 @@ jobs:
       - name: Setup Java JDK
         uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
-          distribution: 'temurin' # یا zulu، هر دو معتبرند
-          java-version: '17' # نسخه استاندارد برای پروژه‌های مدرن اندروید
+          distribution: 'temurin'
+          java-version: '17'
 
       # ۸. سینک کردن پروژه وب با پوشه بومی اندروید (Capacitor)
-      # نکته: از bunx به جای npx استفاده می‌کنیم تا با اکوسیستم Bun سازگار باشد
       - name: Sync Capacitor Android
         run: bunx cap sync android
 
       # ۹. بیلد گرفتن از پروژه اندروید (نسخه Debug برای تست سریع در CI)
-      # اگر نیاز به بیلد Release دارید، باید مراحل امضای دیجیتال (Signing) را اضافه کنید
       - name: Build Android APK (Debug)
         run: |
           cd android
