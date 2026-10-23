@@ -1,4 +1,4 @@
-name: Build and Test
+name: Build and Test (Multi-Store)
 
 on:
   push:
@@ -15,17 +15,17 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # ۲. راه‌اندازی Bun (جایگزین مدرن و سریع‌تر Node.js/npm)
+      # ۲. راه‌اندازی Bun
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
-      # ۳. نصب وابستگی‌ها با استفاده از Bun (به صورت خودکار bun.lock را می‌خواند)
+      # ۳. نصب وابستگی‌ها
       - name: Install Dependencies
         run: bun install
 
-      # ۴. بررسی تایپ‌ها و لینت (طبق اسکریپت package.json شما)
+      # ۴. بررسی تایپ‌ها و لینت
       - name: Type Check & Lint
         run: bun run lint
 
@@ -37,28 +37,37 @@ jobs:
       - name: Build Web Application
         run: bun run build
 
-      # ۷. راه‌اندازی Java JDK (الزامی برای بیلد اندروید)
+      # ۷. راه‌اندازی Java JDK 21
       - name: Setup Java JDK
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
 
-      # ۸. سینک کردن پروژه وب با پوشه بومی اندروید (Capacitor)
+      # ۸. سینک کردن پروژه وب با پوشه بومی اندروید
       - name: Sync Capacitor Android
         run: bunx cap sync android
 
-      # ۹. بیلد گرفتن از پروژه اندروید (نسخه Debug برای تست سریع در CI)
-      - name: Build Android APK (Debug)
+      # ۹. بیلد همزمان هر دو Flavor (بازار و مایکت)
+      - name: Build Android APKs (Bazaar & Myket Debug)
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug
+          # این دستور هر دو نسخه را به صورت موازی و بهینه کامپایل می‌کند
+          ./gradlew assembleBazaarDebug assembleMyketDebug
 
-      # ۱۰. آپلود فایل APK ساخته شده به عنوان Artifact (برای دانلود دستی از گیت‌هاب)
-      - name: Upload Android APK
+      # ۱۰. آپلود فایل APK نسخه بازار
+      - name: Upload Bazaar APK
         uses: actions/upload-artifact@v4
         with:
-          name: undo-download-manager-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: undo-download-manager-bazaar-debug
+          path: android/app/build/outputs/apk/bazaar/debug/app-bazaar-debug.apk
+          retention-days: 7
+
+      # ۱۱. آپلود فایل APK نسخه مایکت
+      - name: Upload Myket APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: undo-download-manager-myket-debug
+          path: android/app/build/outputs/apk/myket/debug/app-myket-debug.apk
           retention-days: 7
