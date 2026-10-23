@@ -24,6 +24,23 @@ android {
         }
     }
 
+    // =================================================================
+    // تعریف Flavorهای بازار و مایکت برای جداسازی کتابخانه‌های پرداخت
+    // =================================================================
+    flavorDimensions "store"
+    productFlavors {
+        bazaar {
+            dimension "store"
+            // می‌توانید برای تمایز در نصب همزمان، پسوند اضافه کنید (اختیاری)
+            // applicationIdSuffix ".bazaar"
+        }
+        myket {
+            dimension "store"
+            // applicationIdSuffix ".myket"
+        }
+    }
+    // =================================================================
+
     signingConfigs {
         release {
             def keystorePath = System.getenv("KEYSTORE_PATH") ?: "undodownloadmanager-release-key.jks"
@@ -45,16 +62,6 @@ android {
             signingConfig signingConfigs.release
         }
     }
-
-    // ==========================================================
-    // حل قطعی مشکل تداخل کلاس‌های بازار و مایکت با pickFirst
-    // ==========================================================
-    packagingOptions {
-        pickFirst 'com/android/vending/billing/IInAppBillingService.class'
-        pickFirst 'com/android/vending/billing/IInAppBillingService$Default.class'
-        pickFirst 'com/android/vending/billing/IInAppBillingService$Stub.class'
-        pickFirst 'com/android/vending/billing/IInAppBillingService$Stub$Proxy.class'
-    }
 }
 
 repositories {
@@ -74,7 +81,17 @@ dependencies {
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     
-    implementation project(':capacitor-cordova-android-plugins')
+    // =================================================================
+    // حل قطعی تداخل: هر Flavor فقط کتابخانه استور مربوط به خود را می‌گیرد
+    // =================================================================
+    bazaarImplementation(project(':capacitor-cordova-android-plugins')) {
+        exclude group: 'com.github.myketstore', module: 'myket-billing-client'
+    }
+    
+    myketImplementation(project(':capacitor-cordova-android-plugins')) {
+        exclude group: 'com.github.cafebazaar.Poolakey', module: 'poolakey'
+    }
+    // =================================================================
 }
 
 apply from: 'capacitor.build.gradle'
