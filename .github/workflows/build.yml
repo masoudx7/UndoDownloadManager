@@ -7,31 +7,61 @@ on:
     branches: [ "main", "master" ]
 
 jobs:
-  build:
+  build-and-test:
     runs-on: ubuntu-latest
 
-    strategy:
-      matrix:
-        node-version: [20.x]
-
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v4
+      # ۱. دریافت کد از ریپازیتوری
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-    - name: Set up Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ matrix.node-version }}
-        cache: 'npm'
+      # ۲. راه‌اندازی Bun (جایگزین مدرن و سریع‌تر Node.js/npm)
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
 
-    - name: Install Dependencies
-      run: npm ci
+      # ۳. نصب وابستگی‌ها با استفاده از Bun (به صورت خودکار bun.lock را می‌خواند)
+      - name: Install Dependencies
+        run: bun install
 
-    - name: Type Check & Lint
-      run: npm run lint
+      # ۴. بررسی تایپ‌ها و لینت (طبق اسکریپت package.json شما)
+      - name: Type Check & Lint
+        run: bun run lint
 
-    - name: Download Native Binaries (yt-dlp & ffmpeg)
-      run: npm run download-binaries
+      # ۵. دانلود باینری‌های بومی (yt-dlp و ffmpeg)
+      - name: Download Native Binaries
+        run: bun run download-binaries
 
-    - name: Build Application
-      run: npm run build
+      # ۶. بیلد گرفتن از بخش فرانت‌اند (Vite)
+      - name: Build Web Application
+        run: bun run build
+
+      # ۷. راه‌اندازی Java JDK (الزامی برای بیلد اندروید)
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          distribution: 'temurin' # یا zulu، هر دو معتبرند
+          java-version: '17' # نسخه استاندارد برای پروژه‌های مدرن اندروید
+
+      # ۸. سینک کردن پروژه وب با پوشه بومی اندروید (Capacitor)
+      # نکته: از bunx به جای npx استفاده می‌کنیم تا با اکوسیستم Bun سازگار باشد
+      - name: Sync Capacitor Android
+        run: bunx cap sync android
+
+      # ۹. بیلد گرفتن از پروژه اندروید (نسخه Debug برای تست سریع در CI)
+      # اگر نیاز به بیلد Release دارید، باید مراحل امضای دیجیتال (Signing) را اضافه کنید
+      - name: Build Android APK (Debug)
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      # ۱۰. آپلود فایل APK ساخته شده به عنوان Artifact (برای دانلود دستی از گیت‌هاب)
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: undo-download-manager-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7
