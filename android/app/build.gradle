@@ -19,12 +19,11 @@ android {
         ]
 
         aaptOptions {
-            ignoreAssetsPattern '!.svn:!.git:!.ds_store:!\*.scc:.\*:!CVS:!thumbs.db:!picasa.ini:!\*~'
+            ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*.jar:!*.apk:!*.swp:!*.tmp:!*.bak:!*.log:!~'
             noCompress 'yt-dlp', 'ffmpeg'
         }
     }
 
-    // بخش تنظیمات امضای دیجیتال (Signing Config)
     signingConfigs {
         release {
             def keystorePath = System.getenv("KEYSTORE_PATH") ?: "undodownloadmanager-release-key.jks"
@@ -47,9 +46,6 @@ android {
         }
     }
 
-    // =================================================================
-    // اضافه شده برای حل مشکل Duplicate Class بین Poolakey و Myket
-    // =================================================================
     packagingOptions {
         exclude 'com/android/vending/billing/IInAppBillingService.class'
         exclude 'com/android/vending/billing/IInAppBillingService$Default.class'
