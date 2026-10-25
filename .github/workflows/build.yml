@@ -16,7 +16,7 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Install Dependencies
+      - name: Install Dependencies (اینجا bun.lock جدید و تمیز ساخته می‌شود)
         run: bun install
 
       - name: Download Native Binaries
@@ -31,8 +31,19 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Sync Capacitor Android
+      # ==========================================================
+      # بخش پاکسازی امن: این دستورات فقط روی سرور گیت‌هاب اجرا می‌شوند
+      # و هیچ آسیبی به فایل‌های کامپیوتر شما نمی‌زنند.
+      # ==========================================================
+      - name: Clean old Android folder (Server-side only)
+        run: rm -rf android
+      
+      - name: Re-add Android Platform (Fresh start)
+        run: bunx cap add android
+      
+      - name: Sync Capacitor
         run: bunx cap sync android
+      # ==========================================================
 
       - name: Build Android Release APK
         run: |
