@@ -33,18 +33,13 @@ jobs:
 
       - name: Clean old Android folder
         run: rm -rf android
-      
+
       - name: Re-add Android Platform
         run: bunx cap add android
-      
+
       - name: Sync Capacitor
         run: bunx cap sync android
 
-      # ==========================================================
-      # 🎯 راه‌حل قطعی: بازنویسی settings.gradle بعد از cap sync
-      # این کار را حتماً باید بعد از sync انجام دهیم چون
-      # cap sync فایل را از template خودش بازنویسی می‌کند
-      # ==========================================================
       - name: Fix settings.gradle with JitPack
         run: |
           cat > android/settings.gradle << 'EOF'
@@ -55,7 +50,7 @@ jobs:
                   gradlePluginPortal()
               }
           }
-          
+
           dependencyResolutionManagement {
               repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
               repositories {
@@ -64,7 +59,7 @@ jobs:
                   maven { url 'https://jitpack.io' }
               }
           }
-          
+
           include ':app'
           include ':capacitor-cordova-android-plugins'
           project(':capacitor-cordova-android-plugins').projectDir = new File('./capacitor-cordova-android-plugins/')
@@ -72,7 +67,6 @@ jobs:
           EOF
           echo "✅ settings.gradle fixed with JitPack"
 
-      # بازنویسی build.gradle ریشه برای پاکسازی
       - name: Fix root build.gradle
         run: |
           cat > android/build.gradle << 'EOF'
@@ -87,25 +81,29 @@ jobs:
                   classpath 'com.google.gms:google-services:4.4.1'
               }
           }
-          
+
           apply from: "variables.gradle"
-          
+
           task clean(type: Delete) {
               delete rootProject.buildDir
           }
           EOF
           echo "✅ build.gradle cleaned up"
-      # ==========================================================
 
-      - name: Build Android Release APK
+      - name: Build Android APKs
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleRelease
+          ./gradlew assembleDebug assembleRelease
+          echo "🔍 Listing all generated APK files:"
+          find . -name "*.apk" -type f
 
       - name: Upload Bazaar APK
         uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: undo-download-manager-bazaar-release
-          path: android/app/build/outputs/apk/release/app-release.apk
+          name: undo-download-manager-apk
+          path: |
+            android/app/build/outputs/apk/debug/*.apk
+            android/app/build/outputs/apk/release/*.apk
           retention-days: 14
