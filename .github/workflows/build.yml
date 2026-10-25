@@ -16,7 +16,7 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Install Dependencies (اینجا bun.lock جدید و تمیز ساخته می‌شود)
+      - name: Install Dependencies
         run: bun install
 
       - name: Download Native Binaries
@@ -31,18 +31,70 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      # ==========================================================
-      # بخش پاکسازی امن: این دستورات فقط روی سرور گیت‌هاب اجرا می‌شوند
-      # و هیچ آسیبی به فایل‌های کامپیوتر شما نمی‌زنند.
-      # ==========================================================
-      - name: Clean old Android folder (Server-side only)
+      - name: Clean old Android folder
         run: rm -rf android
       
-      - name: Re-add Android Platform (Fresh start)
+      - name: Re-add Android Platform
         run: bunx cap add android
       
       - name: Sync Capacitor
         run: bunx cap sync android
+
+      # ==========================================================
+      # 🎯 راه‌حل قطعی: بازنویسی settings.gradle بعد از cap sync
+      # این کار را حتماً باید بعد از sync انجام دهیم چون
+      # cap sync فایل را از template خودش بازنویسی می‌کند
+      # ==========================================================
+      - name: Fix settings.gradle with JitPack
+        run: |
+          cat > android/settings.gradle << 'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+              repositories {
+                  google()
+                  mavenCentral()
+                  maven { url 'https://jitpack.io' }
+              }
+          }
+          
+          include ':app'
+          include ':capacitor-cordova-android-plugins'
+          project(':capacitor-cordova-android-plugins').projectDir = new File('./capacitor-cordova-android-plugins/')
+          apply from: 'capacitor.settings.gradle'
+          EOF
+          echo "✅ settings.gradle fixed with JitPack"
+
+      # بازنویسی build.gradle ریشه برای پاکسازی
+      - name: Fix root build.gradle
+        run: |
+          cat > android/build.gradle << 'EOF'
+          // Top-level build file
+          buildscript {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:8.9.1'
+                  classpath 'com.google.gms:google-services:4.4.1'
+              }
+          }
+          
+          apply from: "variables.gradle"
+          
+          task clean(type: Delete) {
+              delete rootProject.buildDir
+          }
+          EOF
+          echo "✅ build.gradle cleaned up"
       # ==========================================================
 
       - name: Build Android Release APK
