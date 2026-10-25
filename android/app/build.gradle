@@ -13,9 +13,9 @@ android {
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         
         manifestPlaceholders = [
-            marketApplicationId: "ir.mservices.market",
-            marketBindAddress: "ir.mservices.market",
-            marketPermission: "ir.mservices.market.permission.PAYMENT"
+            marketApplicationId: "com.farsitel.bazaar", // شناسه استاندارد بازار
+            marketBindAddress: "com.farsitel.bazaar",
+            marketPermission: "com.farsitel.bazaar.permission.PAYMENT"
         ]
 
         aaptOptions {
@@ -23,23 +23,6 @@ android {
             noCompress 'yt-dlp', 'ffmpeg'
         }
     }
-
-    // =================================================================
-    // تعریف Flavorهای بازار و مایکت برای جداسازی کتابخانه‌های پرداخت
-    // =================================================================
-    flavorDimensions "store"
-    productFlavors {
-        bazaar {
-            dimension "store"
-            // می‌توانید برای تمایز در نصب همزمان، پسوند اضافه کنید (اختیاری)
-            // applicationIdSuffix ".bazaar"
-        }
-        myket {
-            dimension "store"
-            // applicationIdSuffix ".myket"
-        }
-    }
-    // =================================================================
 
     signingConfigs {
         release {
@@ -81,17 +64,7 @@ dependencies {
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     
-    // =================================================================
-    // حل قطعی تداخل: هر Flavor فقط کتابخانه استور مربوط به خود را می‌گیرد
-    // =================================================================
-    bazaarImplementation(project(':capacitor-cordova-android-plugins')) {
-        exclude group: 'com.github.myketstore', module: 'myket-billing-client'
-    }
-    
-    myketImplementation(project(':capacitor-cordova-android-plugins')) {
-        exclude group: 'com.github.cafebazaar.Poolakey', module: 'poolakey'
-    }
-    // =================================================================
+    implementation project(':capacitor-cordova-android-plugins')
 }
 
 apply from: 'capacitor.build.gradle'
@@ -102,5 +75,5 @@ try {
         apply plugin: 'com.google.gms.google-services'
     }
 } catch(Exception e) {
-    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+    logger.info("google-services.json not found, google-services plugin not applied.")
 }

@@ -28,8 +28,8 @@ class YtDlpService {
   }
 
   /**
-   * Extract video / audio info, thumbnail, duration, and formats using yt-dlp.
-   * On native Android, relies strictly on the packaged local YtDlpPlugin (fully offline & independent).
+   * Extract video / audio info, thumbnail, duration, and formats.
+   * On native Android, relies strictly on the packaged local engine (fully offline & independent).
    * On Web/development, uses the backend API endpoint.
    */
   public async extractInfo(url: string): Promise<YtDlpMediaInfo> {
@@ -40,7 +40,7 @@ class YtDlpService {
 
     const win = window as any;
 
-    // 1. Native Android Path: strictly use local YtDlpPlugin
+    // 1. Native Android Path: strictly use local native plugin
     if (this.isNative) {
       if (win.Capacitor?.Plugins?.YtDlp) {
         try {
@@ -50,11 +50,11 @@ class YtDlpService {
           }
           throw new Error('اطلاعاتی از پلاگین بومی دریافت نشد.');
         } catch (nativeErr: any) {
-          console.error('Native YtDlp plugin extraction error:', nativeErr);
+          console.error('Native plugin extraction error:', nativeErr);
           throw new Error(this.formatErrorMessage(nativeErr.message || 'خطا در استخراج اطلاعات بومی. لطفاً لینک را بررسی کنید.'));
         }
       } else {
-        throw new Error('پلاگین بومی YtDlp در این دستگاه بارگذاری نشده است.');
+        throw new Error('پلاگین بومی در این دستگاه بارگذاری نشده است.');
       }
     }
 
@@ -89,8 +89,8 @@ class YtDlpService {
   }
 
   /**
-   * Start real download using yt-dlp / native plugin or Web SSE.
-   * On native Android, uses local YtDlpPlugin process execution with real-time events.
+   * Start real download using native plugin or Web SSE.
+   * On native Android, uses local plugin process execution with real-time events.
    * On Web, uses Server-Sent Events (SSE).
    */
   public startDownload(
@@ -147,7 +147,7 @@ class YtDlpService {
 
           return;
         } else {
-          reject(new Error('پلاگین بومی YtDlp روی این دستگاه در دسترس نیست.'));
+          reject(new Error('پلاگین بومی روی این دستگاه در دسترس نیست.'));
           return;
         }
       }
@@ -199,7 +199,7 @@ class YtDlpService {
             }
           }
         } catch (parseErr) {
-          console.error('Error parsing yt-dlp SSE message:', parseErr);
+          console.error('Error parsing download SSE message:', parseErr);
         }
       };
 
@@ -331,7 +331,7 @@ class YtDlpService {
   }
 
   /**
-   * Translates common yt-dlp error codes to user-friendly Persian messages
+   * Translates common download error codes to user-friendly Persian messages
    */
   private formatErrorMessage(error: string): string {
     const lower = error.toLowerCase();
@@ -348,7 +348,7 @@ class YtDlpService {
       return 'این محتوا برای منطقه جغرافیایی فعلی مسدود است (Geo-Blocked).';
     }
     if (lower.includes('unsupported url')) {
-      return 'فرمت این آدرس اینترنتی توسط yt-dlp پشتیبانی نمی‌شود.';
+      return 'فرمت این آدرس اینترنتی پشتیبانی نمی‌شود.';
     }
     if (lower.includes('timeout') || lower.includes('network') || lower.includes('connection')) {
       return 'خطا در ارتباط با سرور یا قطعی اینترنت رخ داده است.';
