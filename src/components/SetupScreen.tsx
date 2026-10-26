@@ -25,7 +25,13 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSetupComplete }) => 
       });
       onSetupComplete();
     } catch (err: any) {
-      setError(err.message || 'خطا در دانلود باینری‌ها. لطفاً اتصال اینترنت خود را بررسی کنید.');
+      let msg = err.message || '';
+      if (msg.includes('aborted') || msg.includes('AbortError')) {
+        msg = 'درخواست متوقف شد یا اتصال اینترنت قطع گردید. لطفاً مجدداً تلاش کنید.';
+      } else {
+        msg = 'خطا در دانلود موتور پردازش. لطفاً اتصال اینترنت خود را بررسی کنید.';
+      }
+      setError(msg);
       setDownloading(false);
     }
   };

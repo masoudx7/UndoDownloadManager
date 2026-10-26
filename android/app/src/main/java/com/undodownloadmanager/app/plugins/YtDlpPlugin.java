@@ -173,28 +173,46 @@ public class YtDlpPlugin extends Plugin {
     public void ensureBinaries(PluginCall call) {
         executor.execute(() -> {
             try {
-                File binDir = new File(getContext().getFilesDir(), "bin");
-                binDir.mkdirs();
+                Context context = getContext();
+                File binDir = new File(context.getFilesDir(), "bin");
+                if (!binDir.exists()) {
+                    binDir.mkdirs();
+                }
                 
-                String arch = Build.SUPPORTED_ABIS != null && Build.SUPPORTED_ABIS.length > 0 ? Build.SUPPORTED_ABIS[0] : "arm64-v8a";
                 String ytDlpUrl = CDN_BASE + "/yt-dlp_linux_aarch64";
-                
                 File ytDlpFile = new File(binDir, "yt-dlp");
                 
                 if (!ytDlpFile.exists() || ytDlpFile.length() < 1024) {
                     downloadWithProgress(ytDlpUrl, ytDlpFile, call);
                 }
                 
-                ytDlpFile.setExecutable(true, false);
+                // Explicitly mark as executable
+                boolean ytDlpExec1 = ytDlpFile.setExecutable(true);
+                boolean ytDlpExec2 = ytDlpFile.setExecutable(true, false);
                 ytDlpFile.setReadable(true, false);
                 ytDlpFile.setWritable(true, false);
+
+                if (ffmpegBin != null && ffmpegBin.exists() && ffmpegBin.length() > 0) {
+                    ffmpegBin.setExecutable(true);
+                    ffmpegBin.setExecutable(true, false);
+                    ffmpegBin.setReadable(true, false);
+                    ffmpegBin.setWritable(true, false);
+                }
                 
+                Log.i(TAG, "=== BINARY VERIFICATION ===");
+                Log.i(TAG, "Absolute path: " + ytDlpFile.getAbsolutePath());
+                Log.i(TAG, "Exists: " + ytDlpFile.exists());
+                Log.i(TAG, "Size: " + ytDlpFile.length() + " bytes");
+                Log.i(TAG, "Can execute: " + ytDlpFile.canExecute());
+                Log.i(TAG, "===========================");
+
                 JSObject ret = new JSObject();
                 ret.put("success", true);
-                ret.put("ready", true);
+                ret.put("ready", ytDlpFile.exists() && ytDlpFile.length() > 0);
                 call.resolve(ret);
                 
             } catch (Exception e) {
+                Log.e(TAG, "ensureBinaries failed", e);
                 call.reject("Setup failed: " + e.getMessage());
             }
         });
