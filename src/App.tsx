@@ -17,8 +17,24 @@ import { ytDlpService } from './services/ytDlpService';
 import { storageService } from './services/storageService';
 import { downloadQueueManager } from './services/downloadQueueManager';
 import { networkService } from './services/networkService';
+import { SetupScreen } from './components/SetupScreen';
+import { binaryManager } from './services/binaryManagerService';
 
 export default function App() {
+  const [isBinariesReady, setIsBinariesReady] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const checkBinariesOnStart = async () => {
+      try {
+        const status = await binaryManager.checkBinaries();
+        setIsBinariesReady(status.installed);
+      } catch (e) {
+        setIsBinariesReady(true);
+      }
+    };
+    checkBinariesOnStart();
+  }, []);
+
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     return storageService.getDarkMode();
   });
@@ -415,6 +431,10 @@ export default function App() {
   });
 
   const sortedDownloads = [...filteredDownloads].sort((a, b) => b.id.localeCompare(a.id));
+
+  if (isBinariesReady === false) {
+    return <SetupScreen onSetupComplete={() => setIsBinariesReady(true)} />;
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-['Vazirmatn',sans-serif] transition-colors duration-200 pb-24">

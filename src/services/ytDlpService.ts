@@ -20,31 +20,38 @@ class YtDlpService {
     this.isNative = Capacitor.isNativePlatform();
   }
 
-  /**
-   * Check if running on native Capacitor Android platform
-   */
   public isNativePlatform(): boolean {
     return this.isNative;
   }
 
   /**
-   * Extract video / audio info, thumbnail, duration, and formats.
-   * On native Android, relies strictly on the packaged local engine (fully offline & independent).
-   * On Web/development, uses the backend API endpoint.
+   * Robustly wait for Capacitor native bridge and YtDlp plugin to be fully injected & ready.
    */
+  private async getNativePlugin(): Promise<any> {
+    const win = window as any;
+    if (!this.isNative) return null;
+
+    // Retry up to 25 times (5 seconds total) for the native plugin bridge to initialize upon app launch
+    for (let i = 0; i < 25; i++) {
+      if (win.Capacitor?.Plugins?.YtDlp) {
+        return win.Capacitor.Plugins.YtDlp;
+      }
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    return win.Capacitor?.Plugins?.YtDlp || null;
+  }
+
   public async extractInfo(url: string): Promise<YtDlpMediaInfo> {
     const cleanUrl = url.trim();
     if (!cleanUrl) {
       throw new Error('لطفاً آدرس اینترنتی معتبر وارد کنید.');
     }
 
-    const win = window as any;
-
-    // 1. Native Android Path: strictly use local native plugin
     if (this.isNative) {
-      if (win.Capacitor?.Plugins?.YtDlp) {
+      const plugin = await this.getNativePlugin();
+      if (plugin) {
         try {
-          const res = await win.Capacitor.Plugins.YtDlp.extractInfo({ url: cleanUrl });
+          const res = await plugin.extractInfo({ url: cleanUrl });
           if (res && res.mediaInfo) {
             return res.mediaInfo;
           }
@@ -54,17 +61,14 @@ class YtDlpService {
           throw new Error(this.formatErrorMessage(nativeErr.message || 'خطا در استخراج اطلاعات بومی. لطفاً لینک را بررسی کنید.'));
         }
       } else {
-        throw new Error('پلاگین بومی در این دستگاه بارگذاری نشده است.');
+        throw new Error('پلاگین بومی روی این دستگاه بارگذاری نشده است.');
       }
     }
 
-    // 2. Web / Development Path: call backend API /api/ytdlp/extract
     try {
       const response = await fetch('/api/ytdlp/extract', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: cleanUrl }),
       });
 
@@ -88,28 +92,18 @@ class YtDlpService {
     }
   }
 
-  /**
-   * Start real download using native plugin or Web SSE.
-   * On native Android, uses local plugin process execution with real-time events.
-   * On Web, uses Server-Sent Events (SSE).
-   */
   public startDownload(
     item: DownloadItem,
     onProgress: (event: YtDlpProgressEvent) => void
   ): Promise<{ success: boolean; localPath?: string; error?: string }> {
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
       const { id, url, name, formatId, audioOnly } = item;
 
-      // Close previous stream or task for same id if exists
       this.cancelDownload(id);
 
-      const win = window as any;
-
-      // 1. Native Android Path: strictly use Capacitor Plugin
       if (this.isNative) {
-        if (win.Capacitor?.Plugins?.YtDlp) {
-          const plugin = win.Capacitor.Plugins.YtDlp;
-
+        const plugin = await this.getNativePlugin();
+        if (plugin) {
           const progressListener = plugin.addListener('onProgress', async (event: YtDlpProgressEvent) => {
             if (event.downloadId === id) {
               onProgress(event);
@@ -152,7 +146,6 @@ class YtDlpService {
         }
       }
 
-      // 2. Web / Development Path: Real Server-Sent Events (SSE) Stream
       const queryParams = new URLSearchParams({
         id,
         url,
@@ -168,7 +161,7 @@ class YtDlpService {
         eventSource = new EventSource(sseUrl);
         this.activeStreams.set(id, eventSource);
       } catch (err: any) {
-        reject(new Error('ناتوان در ایجاد اتصال SSE با سرور.'));
+        reject(new Error('ناتوان در ایجاد اتصال با سرور.'));
         return;
       }
 
@@ -199,7 +192,7 @@ class YtDlpService {
             }
           }
         } catch (parseErr) {
-          console.error('Error parsing download SSE message:', parseErr);
+          console.error('Error parsing download message:', parseErr);
         }
       };
 
@@ -223,20 +216,19 @@ class YtDlpService {
     });
   }
 
-  /**
-   * Pause an active download
-   */
   public async pauseDownload(downloadId: string): Promise<boolean> {
     this.cleanupStream(downloadId);
 
-    const win = window as any;
-    if (this.isNative && win.Capacitor?.Plugins?.YtDlp) {
-      try {
-        await win.Capacitor.Plugins.YtDlp.pauseDownload({ id: downloadId });
-        return true;
-      } catch (e) {
-        console.error('Native pause error:', e);
-        return false;
+    if (this.isNative) {
+      const plugin = await this.getNativePlugin();
+      if (plugin) {
+        try {
+          await plugin.pauseDownload({ id: downloadId });
+          return true;
+        } catch (e) {
+          console.error('Native pause error:', e);
+          return false;
+        }
       }
     }
 
@@ -257,21 +249,20 @@ class YtDlpService {
     return false;
   }
 
-  /**
-   * Resume a paused or failed download
-   */
   public async resumeDownload(
     item: DownloadItem,
     onProgress: (event: YtDlpProgressEvent) => void
   ): Promise<boolean> {
-    const win = window as any;
-    if (this.isNative && win.Capacitor?.Plugins?.YtDlp) {
-      try {
-        await win.Capacitor.Plugins.YtDlp.resumeDownload({ id: item.id });
-        return true;
-      } catch (e) {
-        console.error('Native resume error:', e);
-        return false;
+    if (this.isNative) {
+      const plugin = await this.getNativePlugin();
+      if (plugin) {
+        try {
+          await plugin.resumeDownload({ id: item.id });
+          return true;
+        } catch (e) {
+          console.error('Native resume error:', e);
+          return false;
+        }
       }
     }
 
@@ -284,20 +275,19 @@ class YtDlpService {
     }
   }
 
-  /**
-   * Cancel and delete an in-progress download
-   */
   public async cancelDownload(downloadId: string): Promise<boolean> {
     this.cleanupStream(downloadId);
 
-    const win = window as any;
-    if (this.isNative && win.Capacitor?.Plugins?.YtDlp) {
-      try {
-        await win.Capacitor.Plugins.YtDlp.cancelDownload({ id: downloadId });
-        return true;
-      } catch (e) {
-        console.error('Native cancel error:', e);
-        return false;
+    if (this.isNative) {
+      const plugin = await this.getNativePlugin();
+      if (plugin) {
+        try {
+          await plugin.cancelDownload({ id: downloadId });
+          return true;
+        } catch (e) {
+          console.error('Native cancel error:', e);
+          return false;
+        }
       }
     }
 
@@ -318,9 +308,6 @@ class YtDlpService {
     return false;
   }
 
-  /**
-   * Clean up event source stream
-   */
   private cleanupStream(downloadId: string): void {
     notificationService.clearNotification(downloadId);
     const stream = this.activeStreams.get(downloadId);
@@ -330,9 +317,6 @@ class YtDlpService {
     }
   }
 
-  /**
-   * Translates common download error codes to user-friendly Persian messages
-   */
   private formatErrorMessage(error: string): string {
     const lower = error.toLowerCase();
     if (lower.includes('age-restricted') || lower.includes('sign in to confirm your age')) {

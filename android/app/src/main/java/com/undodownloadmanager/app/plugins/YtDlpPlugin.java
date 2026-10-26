@@ -27,6 +27,8 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -73,34 +75,158 @@ public class YtDlpPlugin extends Plugin {
     }
 
     private void unpackBinariesIfNeeded(Context context) {
-        try {
-            // Unpack yt-dlp
-            if (!ytDlpBin.exists() || ytDlpBin.length() == 0) {
-                copyAssetBinary(context, "bin/yt-dlp", ytDlpBin);
+        executor.execute(() -> {
+            try {
+                // 1. Unpack or On-Demand Download yt-dlp
+                if (!ytDlpBin.exists() || ytDlpBin.length() < 1024) {
+                    try {
+                        copyAssetBinary(context, "bin/yt-dlp", ytDlpBin);
+                    } catch (Exception assetEx) {
+                        Log.i(TAG, "yt-dlp not found in assets. Starting On-Demand download...");
+                        downloadBinaryFromUrl(
+                            "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux_aarch64",
+                            ytDlpBin,
+                            "yt-dlp"
+                        );
+                    }
+                }
+                if (ytDlpBin.exists() && ytDlpBin.length() > 0) {
+                    ytDlpBin.setExecutable(true, false);
+                    ytDlpBin.setReadable(true, false);
+                    ytDlpBin.setWritable(true, false);
+                }
+
+                // 2. Unpack or On-Demand Download ffmpeg
+                if (!ffmpegBin.exists() || ffmpegBin.length() < 1024) {
+                    try {
+                        copyAssetBinary(context, "bin/ffmpeg", ffmpegBin);
+                    } catch (Exception assetEx) {
+                        Log.i(TAG, "ffmpeg not found in assets, skipping or optional.");
+                    }
+                }
+                if (ffmpegBin.exists() && ffmpegBin.length() > 0) {
+                    ffmpegBin.setExecutable(true, false);
+                    ffmpegBin.setReadable(true, false);
+                    ffmpegBin.setWritable(true, false);
+                }
+
+                Log.i(TAG, "Binaries ready. yt-dlp path: " + ytDlpBin.getAbsolutePath());
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to initialize native binaries", e);
             }
-            if (ytDlpBin.exists()) {
-                ytDlpBin.setExecutable(true, false);
-                ytDlpBin.setReadable(true, false);
-                ytDlpBin.setWritable(true, false);
+        });
+    }
+
+    private void downloadBinaryFromUrl(String fileUrl, File outputFile, String binaryName) {
+        try {
+            Log.i(TAG, "Starting On-Demand download for " + binaryName + " from " + fileUrl);
+            URL url = new URL(fileUrl);
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(30000);
+            connection.connect();
+
+            int responseCode = connection.getResponseCode();
+            if (responseCode != HttpURLConnection.HTTP_OK) {
+                Log.e(TAG, "Failed to download " + binaryName + ", HTTP response: " + responseCode);
+                return;
             }
 
-            // Unpack ffmpeg
-            if (!ffmpegBin.exists() || ffmpegBin.length() == 0) {
-                try {
-                    copyAssetBinary(context, "bin/ffmpeg", ffmpegBin);
-                } catch (Exception e) {
-                    Log.w(TAG, "ffmpeg binary not found in assets, skipping: " + e.getMessage());
+            int fileLength = connection.getContentLength();
+            try (InputStream input = connection.getInputStream();
+                 OutputStream output = new FileOutputStream(outputFile)) {
+                byte[] data = new byte[8192];
+                long total = 0;
+                int count;
+                while ((count = input.read(data)) != -1) {
+                    total += count;
+                    output.write(data, 0, count);
+                    if (fileLength > 0) {
+                        int progress = (int) (total * 100 / fileLength);
+                        emitBinaryProgress(binaryName, progress, total, fileLength);
+                    }
+                }
+                output.flush();
+            }
+
+            outputFile.setExecutable(true, false);
+            outputFile.setReadable(true, false);
+            outputFile.setWritable(true, false);
+            Log.i(TAG, binaryName + " downloaded and set executable successfully.");
+        } catch (Exception e) {
+            Log.e(TAG, "Error downloading " + binaryName, e);
+        }
+    }
+
+    private void emitBinaryProgress(String binaryName, int percent, long downloaded, long total) {
+        JSObject data = new JSObject();
+        data.put("binaryName", binaryName);
+        data.put("progress", percent);
+        data.put("downloadedBytes", downloaded);
+        data.put("totalBytes", total);
+        notifyListeners("onBinaryProgress", data);
+    }
+
+    private static final String CDN_BASE = "https://github.com/yt-dlp/yt-dlp/releases/latest/download";
+
+    @PluginMethod
+    public void ensureBinaries(PluginCall call) {
+        executor.execute(() -> {
+            try {
+                File binDir = new File(getContext().getFilesDir(), "bin");
+                binDir.mkdirs();
+                
+                String arch = Build.SUPPORTED_ABIS != null && Build.SUPPORTED_ABIS.length > 0 ? Build.SUPPORTED_ABIS[0] : "arm64-v8a";
+                String ytDlpUrl = CDN_BASE + "/yt-dlp_linux_aarch64";
+                
+                File ytDlpFile = new File(binDir, "yt-dlp");
+                
+                if (!ytDlpFile.exists() || ytDlpFile.length() < 1024) {
+                    downloadWithProgress(ytDlpUrl, ytDlpFile, call);
+                }
+                
+                ytDlpFile.setExecutable(true, false);
+                ytDlpFile.setReadable(true, false);
+                ytDlpFile.setWritable(true, false);
+                
+                JSObject ret = new JSObject();
+                ret.put("success", true);
+                ret.put("ready", true);
+                call.resolve(ret);
+                
+            } catch (Exception e) {
+                call.reject("Setup failed: " + e.getMessage());
+            }
+        });
+    }
+
+    private void downloadWithProgress(String fileUrl, File outputFile, PluginCall call) throws Exception {
+        URL url = new URL(fileUrl);
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setConnectTimeout(15000);
+        connection.setReadTimeout(30000);
+        connection.connect();
+
+        int responseCode = connection.getResponseCode();
+        if (responseCode != HttpURLConnection.HTTP_OK) {
+            throw new Exception("HTTP error code: " + responseCode);
+        }
+
+        int fileLength = connection.getContentLength();
+        try (InputStream input = connection.getInputStream();
+             OutputStream output = new FileOutputStream(outputFile)) {
+            byte[] data = new byte[8192];
+            long total = 0;
+            int count;
+            while ((count = input.read(data)) != -1) {
+                total += count;
+                output.write(data, 0, count);
+                if (fileLength > 0) {
+                    int progress = (int) (total * 100 / fileLength);
+                    emitBinaryProgress("yt-dlp", progress, total, fileLength);
                 }
             }
-            if (ffmpegBin.exists()) {
-                ffmpegBin.setExecutable(true, false);
-                ffmpegBin.setReadable(true, false);
-                ffmpegBin.setWritable(true, false);
-            }
-            
-            Log.i(TAG, "Binaries unpacked successfully. yt-dlp path: " + ytDlpBin.getAbsolutePath());
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to unpack native binaries", e);
+            output.flush();
         }
     }
 
