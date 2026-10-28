@@ -20,6 +20,23 @@ class YtDlpService {
 
   constructor() {
     this.isNative = Capacitor.isNativePlatform();
+    if (this.isNative) {
+      this.ensureEngineReady().catch(() => {});
+    }
+  }
+
+  public async ensureEngineReady(): Promise<boolean> {
+    if (!this.isNative) return true;
+    try {
+      const plugin = await this.getNativePlugin();
+      if (plugin?.initEngine) {
+        const res = await plugin.initEngine();
+        return !!res?.ready;
+      }
+    } catch (e) {
+      console.warn('ensureEngineReady warning:', e);
+    }
+    return true;
   }
 
   public isNativePlatform(): boolean {

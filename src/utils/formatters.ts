@@ -1,13 +1,18 @@
-export const formatBytes = (bytes: number): string => {
-  if (bytes === 0) return '۰ بایت';
+export const formatBytes = (bytes: number | string): string => {
+  const num = typeof bytes === 'number' ? bytes : parseFloat(String(bytes).replace(/[^0-9.]/g, ''));
+  if (isNaN(num) || num <= 0) return '۰ بایت';
   const k = 1024;
   const sizes = ['بایت', 'کیلوبایت', 'مگابایت', 'گیگابایت', 'ترابایت'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  const i = Math.floor(Math.log(num) / Math.log(k));
+  const safeIdx = Math.min(i, sizes.length - 1);
+  return parseFloat((num / Math.pow(k, safeIdx)).toFixed(1)) + ' ' + sizes[safeIdx];
 };
 
-export const formatSpeed = (bytesPerSec: number): string => {
-  if (bytesPerSec === 0) return '۰ بایت/ثانیه';
+export const formatSpeed = (bytesPerSec: number | string): string => {
+  if (!bytesPerSec || bytesPerSec === 0 || bytesPerSec === '0') return '۰ بایت/ثانیه';
+  if (typeof bytesPerSec === 'string' && (bytesPerSec.includes('/s') || bytesPerSec.includes('ثانیه'))) {
+    return bytesPerSec;
+  }
   return formatBytes(bytesPerSec) + '/ثانیه';
 };
 
