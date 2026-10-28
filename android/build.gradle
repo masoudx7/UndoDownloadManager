@@ -8,7 +8,7 @@ buildscript {
     }
     dependencies {
         classpath 'com.android.tools.build:gradle:8.9.1'
-        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.24'
+        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.0.21'
         classpath 'com.google.gms:google-services:4.4.1'
     }
 }
@@ -20,6 +20,23 @@ allprojects {
         google()
         mavenCentral()
         maven { url 'https://jitpack.io' }
+    }
+
+    configurations.all {
+        resolutionStrategy {
+            force "org.jetbrains.kotlin:kotlin-stdlib:2.0.21"
+            force "org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.0.21"
+            force "org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.0.21"
+            force "org.jetbrains.kotlin:kotlin-reflect:2.0.21"
+        }
+    }
+}
+
+subprojects {
+    tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+        kotlinOptions {
+            jvmTarget = "21"
+        }
     }
 }
 
