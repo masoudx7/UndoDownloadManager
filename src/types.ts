@@ -13,6 +13,8 @@ export interface YtDlpFormat {
   vcodec?: string;
   acodec?: string;
   is_audio_only?: boolean;
+  url?: string;
+  direct_url?: string;
 }
 
 export interface YtDlpMediaInfo {
@@ -58,6 +60,7 @@ export interface DownloadItem {
   eta: string; // Estimated time remaining
   thumbnail?: string;
   formatId?: string;
+  directUrl?: string;
   audioOnly?: boolean;
   localPath?: string;
   errorMessage?: string;

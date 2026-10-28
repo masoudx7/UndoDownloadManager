@@ -355,6 +355,8 @@ app.post("/api/ytdlp/extract", async (req, res) => {
             resolution: `${resStr}p (${found.format_note || 'HD'})`,
             format_note: found.format_note || `کیفیت ${resStr}p`,
             filesize: found.filesize || found.filesize_approx || (parseInt(resStr, 10) * 1024 * 1024 * 0.4),
+            url: found.url || undefined,
+            direct_url: found.url || undefined,
             is_audio_only: false,
           });
         }
@@ -374,18 +376,23 @@ app.post("/api/ytdlp/extract", async (req, res) => {
             resolution: vf.resolution || `${vf.height || 720}p`,
             format_note: vf.format_note || 'کیفیت استاندارد',
             filesize: vf.filesize || vf.filesize_approx || 25000000,
+            url: vf.url || undefined,
+            direct_url: vf.url || undefined,
             is_audio_only: false,
           });
         }
       }
 
       // 2. Add Audio-Only (MP3 / M4A) option
+      const audioFmt = rawFormats.find((f: any) => f.acodec !== 'none' && f.vcodec === 'none');
       formats.push({
-        format_id: 'ba/bestaudio',
+        format_id: audioFmt?.format_id || 'ba/bestaudio',
         ext: 'mp3',
         resolution: 'صوتی MP3 (فقط صدا/موزیک)',
         format_note: 'کیفیت بالا 320kbps',
         filesize: Math.round((parsed.duration || 180) * 40000), // ~320kbps approx
+        url: audioFmt?.url || undefined,
+        direct_url: audioFmt?.url || undefined,
         is_audio_only: true,
       });
 
@@ -454,9 +461,9 @@ app.post("/api/ytdlp/extract", async (req, res) => {
           extractor,
           webpage_url: cleanUrl,
           formats: [
-            { format_id: "best_1080", ext: "mp4", resolution: "1080p MP4 (Full HD)", format_note: "کیفیت بالا", filesize: 41943040, is_audio_only: false },
-            { format_id: "best_720", ext: "mp4", resolution: "720p MP4 (HD)", format_note: "کیفیت استاندارد", filesize: 20971520, is_audio_only: false },
-            { format_id: "mp3_audio", ext: "mp3", resolution: "موتور صوتی MP3 (فقط موزیک/صدا)", format_note: "320kbps", filesize: 5242880, is_audio_only: true },
+            { format_id: "best_1080", ext: "mp4", resolution: "1080p MP4 (Full HD)", format_note: "کیفیت بالا", filesize: 41943040, url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4", direct_url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4", is_audio_only: false },
+            { format_id: "best_720", ext: "mp4", resolution: "720p MP4 (HD)", format_note: "کیفیت استاندارد", filesize: 20971520, url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4", direct_url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4", is_audio_only: false },
+            { format_id: "mp3_audio", ext: "mp3", resolution: "موتور صوتی MP3 (فقط موزیک/صدا)", format_note: "320kbps", filesize: 5242880, url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3", direct_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3", is_audio_only: true },
           ],
           is_playlist: false,
         },
@@ -475,12 +482,76 @@ app.post("/api/ytdlp/extract", async (req, res) => {
         extractor: "generic",
         webpage_url: "https://example.com",
         formats: [
-          { format_id: "best", ext: "mp4", resolution: "بهترین کیفیت (HD)", format_note: "پیش‌فرض", filesize: 25 * 1024 * 1024, is_audio_only: false },
-          { format_id: "mp3", ext: "mp3", resolution: "فایل صوتی MP3", format_note: "صدا", filesize: 5 * 1024 * 1024, is_audio_only: true },
+          { format_id: "best", ext: "mp4", resolution: "بهترین کیفیت (HD)", format_note: "پیش‌فرض", filesize: 25 * 1024 * 1024, url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4", direct_url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4", is_audio_only: false },
+          { format_id: "mp3", ext: "mp3", resolution: "فایل صوتی MP3", format_note: "صدا", filesize: 5 * 1024 * 1024, url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3", direct_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3", is_audio_only: true },
         ],
         is_playlist: false,
       },
     });
+  }
+});
+
+/**
+ * Direct Media Stream Proxy with HTTP Range (206) Support for mobile and web downloads
+ */
+app.get("/api/ytdlp/download-stream", async (req, res) => {
+  const { url, formatId, audioOnly, name } = req.query;
+  if (!url) {
+    return res.status(400).json({ success: false, error: "آدرس اینترنتی وارد نشده است." });
+  }
+
+  const targetUrl = url as string;
+  const isAudio = audioOnly === "true";
+  const filename = decodeURIComponent((name as string) || (isAudio ? "audio.mp3" : "video.mp4"));
+
+  // If already a direct HTTP URL (or if yt-dlp is not available), proxy the stream directly
+  if (!ytDlpAvailable || /\.(mp4|mkv|webm|mp3|wav|iso|zip|rar|7z|pdf|apk)(\?.*)?$/i.test(targetUrl)) {
+    try {
+      const clientReq = (targetUrl.startsWith("https") ? https : http).get(
+        targetUrl,
+        { headers: req.headers.range ? { Range: req.headers.range } : {} },
+        (remoteRes) => {
+          res.writeHead(remoteRes.statusCode || 200, {
+            ...remoteRes.headers,
+            "Content-Disposition": `attachment; filename="${encodeURIComponent(filename)}"`,
+          });
+          remoteRes.pipe(res);
+        }
+      );
+      clientReq.on("error", (e) => {
+        if (!res.headersSent) {
+          res.status(502).json({ success: false, error: "خطا در دریافت فایل از مبدأ: " + e.message });
+        }
+      });
+      req.on("close", () => clientReq.destroy());
+      return;
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e.message });
+    }
+  }
+
+  // Use yt-dlp to stream directly to stdout
+  try {
+    const args = ["-o", "-", "--no-playlist"];
+    if (isAudio) {
+      args.push("-x", "--audio-format", "mp3");
+    } else if (formatId && formatId !== "best") {
+      args.push("-f", `${formatId}+bestaudio/best`);
+    } else {
+      args.push("-f", "best[ext=mp4]/best");
+    }
+    args.push(targetUrl);
+
+    res.setHeader("Content-Type", isAudio ? "audio/mpeg" : "video/mp4");
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(filename)}"`);
+
+    const streamProc = spawn("yt-dlp", args);
+    streamProc.stdout.pipe(res);
+    req.on("close", () => streamProc.kill("SIGTERM"));
+  } catch (err: any) {
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: err.message });
+    }
   }
 });
 

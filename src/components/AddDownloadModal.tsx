@@ -10,6 +10,7 @@ export interface AddDownloadOptions {
   category: DownloadCategory;
   fileSize: number;
   formatId?: string;
+  directUrl?: string;
   audioOnly?: boolean;
   thumbnail?: string;
   extractor?: string;
@@ -32,6 +33,7 @@ export const AddDownloadModal: React.FC<AddDownloadModalProps> = ({
   const [category, setCategory] = useState<DownloadCategory>('video');
   const [fileSizeMb, setFileSizeMb] = useState('35');
   const [selectedFormatId, setSelectedFormatId] = useState<string>('');
+  const [selectedDirectUrl, setSelectedDirectUrl] = useState<string>('');
   const [isAudioOnly, setIsAudioOnly] = useState<boolean>(false);
 
   const [isExtracting, setIsExtracting] = useState(false);
@@ -45,6 +47,7 @@ export const AddDownloadModal: React.FC<AddDownloadModalProps> = ({
     setExtractedData(null);
     setExtractError('');
     setSelectedFormatId('');
+    setSelectedDirectUrl('');
     setIsAudioOnly(false);
 
     if (val) {
@@ -81,6 +84,7 @@ export const AddDownloadModal: React.FC<AddDownloadModalProps> = ({
       if (mediaInfo.formats && mediaInfo.formats.length > 0) {
         const firstFmt = mediaInfo.formats[0];
         setSelectedFormatId(firstFmt.format_id);
+        setSelectedDirectUrl(firstFmt.direct_url || firstFmt.url || '');
         if (firstFmt.filesize) {
           setFileSizeMb(Math.round(firstFmt.filesize / (1024 * 1024)).toString());
         }
@@ -96,6 +100,7 @@ export const AddDownloadModal: React.FC<AddDownloadModalProps> = ({
 
   const handleSelectFormat = (fmt: YtDlpFormat) => {
     setSelectedFormatId(fmt.format_id);
+    setSelectedDirectUrl(fmt.direct_url || fmt.url || '');
     const audio = !!fmt.is_audio_only;
     setIsAudioOnly(audio);
     setCategory(audio ? 'music' : 'video');
@@ -130,6 +135,7 @@ export const AddDownloadModal: React.FC<AddDownloadModalProps> = ({
       category,
       fileSize: bytes,
       formatId: selectedFormatId,
+      directUrl: selectedDirectUrl || undefined,
       audioOnly: isAudioOnly,
       thumbnail: extractedData?.thumbnail,
       extractor: extractedData?.extractor,
@@ -138,6 +144,7 @@ export const AddDownloadModal: React.FC<AddDownloadModalProps> = ({
 
     setUrl('');
     setName('');
+    setSelectedDirectUrl('');
     setExtractedData(null);
     setExtractError('');
     onClose();

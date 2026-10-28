@@ -9,12 +9,14 @@ export interface YtDlpDownloadRequest {
   url: string;
   name: string;
   formatId?: string;
+  directUrl?: string;
   audioOnly?: boolean;
 }
 
 class YtDlpService {
   private activeStreams: Map<string, EventSource> = new Map();
   private isNative: boolean = false;
+  private nativeProcessSupported: boolean | null = null;
 
   constructor() {
     this.isNative = Capacitor.isNativePlatform();
@@ -31,7 +33,6 @@ class YtDlpService {
     const win = window as any;
     if (!this.isNative) return null;
 
-    // Retry up to 30 times (6 seconds total) for the native plugin bridge to initialize upon app launch
     for (let i = 0; i < 30; i++) {
       if (win.Capacitor?.Plugins?.YtDlp) {
         return win.Capacitor.Plugins.YtDlp;
@@ -41,30 +42,76 @@ class YtDlpService {
     return win.Capacitor?.Plugins?.YtDlp || null;
   }
 
+  /**
+   * Queries the native plugin to check whether on-device yt-dlp binary process
+   * can execute or if dual-mode fallback to backend extraction is active.
+   */
+  public async getEngineStatus(): Promise<{
+    nativeProcessSupported: boolean;
+    nativeDirectDownloaderAvailable: boolean;
+    dualMode: boolean;
+  }> {
+    if (!this.isNative) {
+      return {
+        nativeProcessSupported: false,
+        nativeDirectDownloaderAvailable: false,
+        dualMode: true,
+      };
+    }
+
+    try {
+      const plugin = await this.getNativePlugin();
+      if (plugin?.getEngineStatus) {
+        const res = await plugin.getEngineStatus();
+        this.nativeProcessSupported = !!res.nativeProcessSupported;
+        return {
+          nativeProcessSupported: !!res.nativeProcessSupported,
+          nativeDirectDownloaderAvailable: !!res.nativeDirectDownloaderAvailable,
+          dualMode: true,
+        };
+      }
+    } catch (e) {
+      console.warn('Could not query engine status:', e);
+    }
+
+    return {
+      nativeProcessSupported: false,
+      nativeDirectDownloaderAvailable: true,
+      dualMode: true,
+    };
+  }
+
+  private isDirectFile(url: string): boolean {
+    if (!url) return false;
+    const clean = url.toLowerCase().split('?')[0];
+    return /\.(mp4|mkv|webm|mp3|wav|m4a|zip|rar|7z|apk|pdf|bin|iso|tar|gz)$/i.test(clean);
+  }
+
   public async extractInfo(url: string): Promise<YtDlpMediaInfo> {
     const cleanUrl = url.trim();
     if (!cleanUrl) {
       throw new Error('لطفاً آدرس اینترنتی معتبر وارد کنید.');
     }
 
-    // 1. Native Android Path: Try native plugin first
-    if (this.isNative) {
+    // 1. Native Android Path: Try native plugin if process support is not already marked false
+    if (this.isNative && this.nativeProcessSupported !== false) {
       const plugin = await this.getNativePlugin();
       if (plugin) {
         try {
           const res = await plugin.extractInfo({ url: cleanUrl });
           if (res && res.mediaInfo) {
+            this.nativeProcessSupported = true;
             return res.mediaInfo;
           }
         } catch (nativeErr: any) {
-          console.warn('Native plugin extraction error, attempting backend proxy fallback:', nativeErr);
-          // If native plugin failed (e.g. Linux binary execution unsupported on this Android CPU),
-          // continue below to backend extraction fallback.
+          // Native binary cannot run (Exec format error / Bionic libc). Mark process unsupported and fall back immediately.
+          this.nativeProcessSupported = false;
+          console.info('Native yt-dlp process unsupported on device; falling back to backend extraction:', nativeErr?.message);
         }
       }
     }
 
-    // 2. Web / Hybrid Fallback Path: call backend API /api/ytdlp/extract
+    // 2. Hybrid Fallback Path: call backend API /api/ytdlp/extract
     try {
       const response = await fetch('/api/ytdlp/extract', {
         method: 'POST',
@@ -97,11 +144,11 @@ class YtDlpService {
     onProgress: (event: YtDlpProgressEvent) => void
   ): Promise<{ success: boolean; localPath?: string; error?: string }> {
     return new Promise(async (resolve, reject) => {
-      const { id, url, name, formatId, audioOnly } = item;
+      const { id, url, name, formatId, directUrl, audioOnly } = item;
 
       this.cancelDownload(id);
 
-      // 1. Native Android Path: Run via YtDlp native plugin (process or native Java HTTP engine)
+      // 1. Native Android Path: Run via YtDlp native plugin (Direct HTTP streaming engine or process)
       if (this.isNative) {
         const plugin = await this.getNativePlugin();
         if (plugin) {
@@ -129,9 +176,26 @@ class YtDlpService {
             }
           });
 
+          // Resolve full direct URL for native Java downloader
+          let targetDirectUrl = directUrl;
+          if (!targetDirectUrl && !this.isDirectFile(url) && this.nativeProcessSupported === false) {
+            // If native process cannot execute and no direct URL was extracted, proxy through download-stream
+            const streamPath = `/api/ytdlp/download-stream?url=${encodeURIComponent(url)}&formatId=${encodeURIComponent(formatId || 'best')}&audioOnly=${audioOnly ? 'true' : 'false'}&name=${encodeURIComponent(name)}`;
+            try {
+              targetDirectUrl = new URL(streamPath, window.location.origin).href;
+            } catch (e) {
+              targetDirectUrl = streamPath;
+            }
+          } else if (targetDirectUrl && targetDirectUrl.startsWith('/')) {
+            try {
+              targetDirectUrl = new URL(targetDirectUrl, window.location.origin).href;
+            } catch (e) {}
+          }
+
           plugin.startDownload({
             id,
             url,
+            directUrl: targetDirectUrl || '',
             filename: name,
             formatId: formatId || 'best',
             audioOnly: !!audioOnly,
@@ -142,8 +206,7 @@ class YtDlpService {
 
           return;
         } else {
-          // If native plugin is not loaded, notify with actionable message
-          const msg = 'پلاگین بومی روی این دستگاه در دسترس نیست. لطفاً آخرین نسخه نصبی APK را نصب کنید.';
+          const msg = 'پلاگین بومی روی این دستگاه در دسترس نیست. لطفاً فایل نصبی به‌روز APK را نصب کنید.';
           reject(new Error(msg));
           return;
         }

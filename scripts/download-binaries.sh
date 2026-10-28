@@ -1,48 +1,30 @@
 #!/usr/bin/env bash
-set -e
+# Undo Download Manager - Binary Assets Packager
+#
+# DUAL-MODE ARCHITECTURE NOTE:
+# Linux ELF binaries compiled against glibc (like yt-dlp_linux_aarch64) may fail
+# runtime execution on Android devices due to Bionic libc.
+# The mobile app implements a production-grade dual-mode architecture:
+# - Native Java HTTP chunked stream engine with Range resume & MediaStore for direct on-device downloading.
+# - High-performance backend API for metadata & direct stream extraction.
+# Assets bundled here are optional and best-effort; builds will never fail if binaries are absent.
 
 BIN_DIR="android/app/src/main/assets/bin"
 
-echo "Creating binary assets directory: $BIN_DIR"
+echo "=== Initializing Binary Assets Directory ==="
 mkdir -p "$BIN_DIR"
 touch "$BIN_DIR/.gitkeep"
 
-echo "Downloading latest yt-dlp (linux_aarch64)..."
-if curl -L --connect-timeout 15 --max-time 120 --fail --output "$BIN_DIR/yt-dlp" "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux_aarch64"; then
-    echo "yt-dlp downloaded successfully."
+# Best-effort packaging of binaries if network permits (timeout safely after 15s)
+echo "Checking optional yt-dlp asset download..."
+if curl -L --connect-timeout 15 --max-time 60 --fail --output "$BIN_DIR/yt-dlp" "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux_aarch64"; then
+    echo "yt-dlp downloaded to assets."
     chmod +x "$BIN_DIR/yt-dlp" || true
 else
-    echo "Warning: Could not download yt-dlp binary during packaging. Plugin will use on-demand setup or direct engine."
+    echo "Notice: yt-dlp asset skipped or unavailable. App will use native Java HTTP engine + backend extraction."
 fi
 
-echo "Attempting to download static ffmpeg..."
-TEMP_TAR="ffmpeg-release-arm64-static.tar.xz"
-if curl -L --connect-timeout 15 --max-time 120 --fail --output "$TEMP_TAR" "https://www.johnvansickle.com/ffmpeg/releases/ffmpeg-release-arm64-static.tar.xz"; then
-    echo "Extracting ffmpeg using Python..."
-    python3 -c "
-import tarfile, os
-try:
-    with tarfile.open('$TEMP_TAR', 'r:xz') as tar:
-        for member in tar.getmembers():
-            if member.name.endswith('/ffmpeg'):
-                f = tar.extractfile(member)
-                if f:
-                    with open('$BIN_DIR/ffmpeg', 'wb') as out:
-                        out.write(f.read())
-                break
-except Exception as e:
-    print('Failed extracting tar:', e)
-" || true
-    rm -f "$TEMP_TAR"
-    if [ -f "$BIN_DIR/ffmpeg" ] && [ -s "$BIN_DIR/ffmpeg" ]; then
-        chmod +x "$BIN_DIR/ffmpeg" || true
-        echo "ffmpeg extracted successfully."
-    fi
-else
-    echo "Notice: ffmpeg static build download skipped. Single-stream MP4 downloads will function normally."
-    rm -f "$TEMP_TAR"
-fi
-
+# Ensure .gitkeep is kept so git tracks the folder structure
 touch "$BIN_DIR/.gitkeep"
 echo "Binary assets directory verified:"
 ls -lh "$BIN_DIR"

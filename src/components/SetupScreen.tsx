@@ -107,13 +107,21 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onSetupComplete }) => 
 
         {/* Actions */}
         {!downloading && (
-          <button
-            onClick={startDownload}
-            className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-blue-600 to-cyan-500 text-white font-bold text-sm shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 transition-all flex items-center justify-center gap-2 cursor-pointer"
-          >
-            <RefreshCw className="w-4 h-4" />
-            تلاش مجدد و ادامه
-          </button>
+          <div className="w-full space-y-2">
+            <button
+              onClick={startDownload}
+              className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-blue-600 to-cyan-500 text-white font-bold text-sm shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 transition-all flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <RefreshCw className="w-4 h-4" />
+              تلاش مجدد و ادامه
+            </button>
+            <button
+              onClick={onSetupComplete}
+              className="w-full py-2.5 px-4 rounded-xl text-xs text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
+            >
+              ورود مستقیم به برنامه (موتور ترکیبی خودکار)
+            </button>
+          </div>
         )}
 
         <div className="mt-6 flex items-center gap-2 text-[11px] text-slate-500">

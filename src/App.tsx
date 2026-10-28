@@ -387,6 +387,7 @@ export default function App() {
       eta: initialStatus.eta,
       thumbnail: opts.thumbnail,
       formatId: opts.formatId,
+      directUrl: opts.directUrl,
       audioOnly: opts.audioOnly,
       extractor: opts.extractor,
       duration: opts.duration,
