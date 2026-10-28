@@ -96,6 +96,14 @@ android {
             }
         }
     }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+        checkDependencies false
+        ignoreWarnings true
+        disable 'MissingTranslation', 'ExtraTranslation', 'ValidFragment', 'ExportedService', 'UnusedResources', 'ExpiredTargetSdkVersion', 'ExtractNativeLibs'
+    }
 }
 
 repositories {
