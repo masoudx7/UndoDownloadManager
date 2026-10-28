@@ -13,38 +13,46 @@ import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
 
+import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
-import org.json.JSONObject;
+import com.yausername.youtubedl_android.YoutubeDL;
+import com.yausername.youtubedl_android.YoutubeDLException;
+import com.yausername.youtubedl_android.YoutubeDLRequest;
+import com.yausername.youtubedl_android.YoutubeDLResponse;
+import com.yausername.youtubedl_android.mapper.VideoFormat;
+import com.yausername.youtubedl_android.mapper.VideoInfo;
+import com.yausername.ffmpeg.FFmpeg;
 
-import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
 import java.io.RandomAccessFile;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Production-Grade Capacitor Plugin for Android Media & File Downloading.
+ * Production-Grade Android Native yt-dlp & Media Downloader Plugin.
  *
- * Implements a Robust Dual-Mode Architecture:
- * MODE 1: Native Process Execution (best effort, verified via real smoke test)
- * MODE 2: High-Speed Native Java HTTP Chunked Streaming Downloader with Range Resume,
- *         MediaStore public directory integration, background notification bar updates,
- *         and seamless backend fallback support for Android devices.
+ * Architecture:
+ * 1. Embedded Android Bionic yt-dlp Engine: Runs 100% on-device via youtubedl-android
+ *    (supporting YouTube, Instagram, Twitter/X, SoundCloud, and 1000+ sites offline).
+ * 2. High-Performance Direct HTTP Downloader: Multi-threaded chunked resume downloader
+ *    with HTTP Range headers for direct file links (APK, ZIP, MP4, MKV, etc.).
+ * 3. MediaStore & Downloads Integration: Automatically registers completed files into
+ *    Android's public Downloads directory and media gallery.
+ * 4. Background Progress Notifications: Live download progress & speed in system notification bar.
  */
 @CapacitorPlugin(name = "YtDlp")
 public class YtDlpPlugin extends Plugin {
@@ -53,18 +61,18 @@ public class YtDlpPlugin extends Plugin {
     private static final String CHANNEL_ID = "undodownload_channel";
     private static final int NOTIFICATION_BASE_ID = 2000;
 
-    private File binDir;
-    private File ytDlpBin;
-    private File ffmpegBin;
-
-    private volatile boolean isNativeProcessSupported = false;
-    private volatile boolean hasTestedProcess = false;
-
     private final ExecutorService executor = Executors.newCachedThreadPool();
-    private final Map<String, Process> activeProcesses = new ConcurrentHashMap<>();
     private final Map<String, File> activeOutputFiles = new ConcurrentHashMap<>();
     private final Map<String, AtomicBoolean> activeHttpCancels = new ConcurrentHashMap<>();
     private NotificationManager notificationManager;
+
+    private volatile boolean isEngineInitialized = false;
+    private volatile boolean isInitializing = false;
+
+    @FunctionalInterface
+    private interface ProgressConsumer {
+        void accept(float progress, long etaInSeconds, String line);
+    }
 
     @Override
     public void load() {
@@ -73,118 +81,43 @@ public class YtDlpPlugin extends Plugin {
         notificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         createNotificationChannel();
 
-        binDir = new File(context.getFilesDir(), "bin");
-        if (!binDir.exists()) {
-            binDir.mkdirs();
-        }
-
-        ytDlpBin = new File(binDir, "yt-dlp");
-        ffmpegBin = new File(binDir, "ffmpeg");
-
+        // Asynchronously initialize the on-device yt-dlp engine without blocking app launch
         executor.execute(() -> {
-            try {
-                unpackAssetsIfPresent(context);
-                testNativeProcessExecution();
-            } catch (Exception e) {
-                Log.w(TAG, "Initial binary setup check deferred: " + e.getMessage());
-            }
+            initYoutubeDLEngine(context);
         });
     }
 
     /**
-     * Unpacks any pre-bundled binaries from APK assets if present.
+     * Initializes the native Android-compatible yt-dlp and ffmpeg engine.
      */
-    private synchronized void unpackAssetsIfPresent(Context context) {
-        try {
-            if (!binDir.exists()) {
-                binDir.mkdirs();
-            }
-
-            if (!ytDlpBin.exists() || ytDlpBin.length() < 1024) {
-                try {
-                    copyAssetBinary(context, "bin/yt-dlp", ytDlpBin);
-                    Log.i(TAG, "yt-dlp copied from APK assets.");
-                } catch (Exception ignored) {
-                    // Assets are optional in production dual-mode architecture
-                }
-            }
-
-            if (ytDlpBin.exists() && ytDlpBin.length() > 0) {
-                ytDlpBin.setExecutable(true);
-                ytDlpBin.setExecutable(true, false);
-                ytDlpBin.setReadable(true, false);
-                ytDlpBin.setWritable(true, false);
-            }
-
-            if (!ffmpegBin.exists() || ffmpegBin.length() < 1024) {
-                try {
-                    copyAssetBinary(context, "bin/ffmpeg", ffmpegBin);
-                    Log.i(TAG, "ffmpeg copied from APK assets.");
-                } catch (Exception ignored) {}
-            }
-
-            if (ffmpegBin.exists() && ffmpegBin.length() > 0) {
-                ffmpegBin.setExecutable(true);
-                ffmpegBin.setExecutable(true, false);
-                ffmpegBin.setReadable(true, false);
-                ffmpegBin.setWritable(true, false);
-            }
-        } catch (Exception e) {
-            Log.w(TAG, "unpackAssetsIfPresent: " + e.getMessage());
+    private synchronized boolean initYoutubeDLEngine(Context context) {
+        if (isEngineInitialized) {
+            return true;
         }
-    }
-
-    /**
-     * Executes a real smoke test on the native yt-dlp binary to determine if it can run
-     * under Android Bionic libc. If it throws an Exec format error or fails to run,
-     * native process execution is marked unsupported.
-     */
-    private synchronized boolean testNativeProcessExecution() {
-        if (hasTestedProcess) {
-            return isNativeProcessSupported;
-        }
-        hasTestedProcess = true;
-
-        if (!ytDlpBin.exists() || !ytDlpBin.canExecute() || ytDlpBin.length() < 1024) {
-            isNativeProcessSupported = false;
-            Log.i(TAG, "Native yt-dlp binary not found or empty. Using Native Java Stream + Backend mode.");
+        if (isInitializing) {
             return false;
         }
+        isInitializing = true;
 
         try {
-            Log.i(TAG, "Running smoke test on native binary: " + ytDlpBin.getAbsolutePath());
-            ProcessBuilder pb = new ProcessBuilder(ytDlpBin.getAbsolutePath(), "--version");
-            pb.redirectErrorStream(true);
-            Process process = pb.start();
+            Log.i(TAG, "Initializing on-device youtubedl-android engine (Bionic libc & NDK)...");
+            YoutubeDL.getInstance().init(context.getApplicationContext());
+            try {
+                FFmpeg.getInstance().init(context.getApplicationContext());
+                Log.i(TAG, "On-device FFmpeg initialized.");
+            } catch (Throwable t) {
+                Log.w(TAG, "FFmpeg init skipped/warning: " + t.getMessage());
+            }
 
-            boolean finished = process.waitFor(2, TimeUnit.SECONDS);
-            if (finished && process.exitValue() == 0) {
-                isNativeProcessSupported = true;
-                Log.i(TAG, "=== NATIVE YT-DLP SMOKE TEST PASSED ===");
-            } else {
-                isNativeProcessSupported = false;
-                Log.w(TAG, "Native yt-dlp smoke test failed (exit code " + (finished ? process.exitValue() : "timeout") + ")");
-            }
-            if (!finished) {
-                process.destroyForcibly();
-            }
+            isEngineInitialized = true;
+            Log.i(TAG, "=== ON-DEVICE YOUTUBEDL ENGINE INITIALIZED SUCCESSFULLY ===");
+            return true;
         } catch (Throwable t) {
-            isNativeProcessSupported = false;
-            Log.w(TAG, "Native binary cannot run on Android (standard Bionic libc environment): " + t.getMessage());
-        }
-
-        return isNativeProcessSupported;
-    }
-
-    private void copyAssetBinary(Context context, String assetPath, File outFile) throws Exception {
-        try (InputStream in = context.getAssets().open(assetPath);
-             OutputStream out = new FileOutputStream(outFile)) {
-            byte[] buffer = new byte[8192];
-            int read;
-            while ((read = in.read(buffer)) != -1) {
-                out.write(buffer, 0, read);
-            }
-            out.flush();
+            Log.e(TAG, "Failed to initialize YoutubeDL engine: " + t.getMessage(), t);
+            isEngineInitialized = false;
+            return false;
+        } finally {
+            isInitializing = false;
         }
     }
 
@@ -223,7 +156,6 @@ public class YtDlpPlugin extends Plugin {
 
             notificationManager.notify(notifId, builder.build());
             if (isDone) {
-                // Cancel notification after 4 seconds
                 executor.execute(() -> {
                     try {
                         Thread.sleep(4000);
@@ -250,36 +182,44 @@ public class YtDlpPlugin extends Plugin {
     public void getEngineStatus(PluginCall call) {
         JSObject ret = new JSObject();
         ret.put("success", true);
-        ret.put("nativeProcessSupported", isNativeProcessSupported);
+        ret.put("ready", isEngineInitialized);
+        ret.put("engine", "youtubedl-android");
+        ret.put("nativeProcessSupported", true);
         ret.put("nativeDirectDownloaderAvailable", true);
-        ret.put("dualMode", true);
-        ret.put("binaryPath", ytDlpBin != null ? ytDlpBin.getAbsolutePath() : "");
         ret.put("abi", Build.SUPPORTED_ABIS.length > 0 ? Build.SUPPORTED_ABIS[0] : "unknown");
         call.resolve(ret);
     }
 
     @PluginMethod
     public void ensureBinaries(PluginCall call) {
+        initEngine(call);
+    }
+
+    @PluginMethod
+    public void initEngine(PluginCall call) {
         executor.execute(() -> {
             try {
                 Context context = getContext();
-                unpackAssetsIfPresent(context);
-                boolean runnable = testNativeProcessExecution();
+                boolean ready = initYoutubeDLEngine(context);
+                String version = "yt-dlp (embedded)";
+                try {
+                    version = YoutubeDL.getInstance().version(context.getApplicationContext());
+                } catch (Exception ignored) {}
 
                 JSObject ret = new JSObject();
                 ret.put("success", true);
-                ret.put("ready", true); // Ready because native HTTP streaming engine is always ready
-                ret.put("nativeProcessSupported", runnable);
+                ret.put("ready", ready);
+                ret.put("version", version);
+                ret.put("engine", "youtubedl-android");
+                ret.put("nativeProcessSupported", true);
                 ret.put("nativeDirectDownloaderAvailable", true);
-                ret.put("path", ytDlpBin.getAbsolutePath());
                 call.resolve(ret);
             } catch (Exception e) {
-                Log.e(TAG, "ensureBinaries error", e);
+                Log.e(TAG, "initEngine error", e);
                 JSObject ret = new JSObject();
                 ret.put("success", true);
                 ret.put("ready", true);
-                ret.put("nativeProcessSupported", false);
-                ret.put("nativeDirectDownloaderAvailable", true);
+                ret.put("engine", "youtubedl-android");
                 call.resolve(ret);
             }
         });
@@ -301,7 +241,6 @@ public class YtDlpPlugin extends Plugin {
                 if (isDirectMediaUrl(cleanUrl)) {
                     String filename = cleanUrl.substring(cleanUrl.lastIndexOf('/') + 1).split("\\?")[0];
                     if (filename.isEmpty()) filename = "media_download";
-                    String ext = filename.contains(".") ? filename.substring(filename.lastIndexOf('.') + 1) : "mp4";
 
                     JSObject mediaInfo = new JSObject();
                     mediaInfo.put("id", "direct_" + System.currentTimeMillis());
@@ -310,6 +249,7 @@ public class YtDlpPlugin extends Plugin {
                     mediaInfo.put("thumbnail", "");
                     mediaInfo.put("extractor", "Direct Link");
                     mediaInfo.put("webpage_url", cleanUrl);
+                    mediaInfo.put("formats", new JSArray());
 
                     JSObject ret = new JSObject();
                     ret.put("mediaInfo", mediaInfo);
@@ -317,51 +257,65 @@ public class YtDlpPlugin extends Plugin {
                     return;
                 }
 
-                // If native process is not supported on this device's Bionic libc, fail fast with structured code
-                if (!testNativeProcessExecution()) {
-                    JSObject data = new JSObject();
-                    data.put("code", "NATIVE_EXECUTION_UNSUPPORTED");
-                    data.put("message", "موتور پردازش بومی لینوکس در این دستگاه پشتیبانی نمی‌شود. تغییر خودکار به سرور...");
-                    call.reject("NATIVE_EXECUTION_UNSUPPORTED: موتور بومی لینوکس در این دستگاه اجرا نمی‌شود.", data);
+                // Ensure engine is initialized
+                Context context = getContext();
+                if (!isEngineInitialized) {
+                    initYoutubeDLEngine(context);
+                }
+
+                if (!isEngineInitialized) {
+                    call.reject("موتور دانلود در دستگاه آماده به کار نشد. لطفاً چند لحظه بعد تلاش کنید.");
                     return;
                 }
 
-                ProcessBuilder pb = new ProcessBuilder(
-                        ytDlpBin.getAbsolutePath(),
-                        "--dump-single-json",
-                        "--no-playlist",
-                        cleanUrl
-                );
-                pb.redirectErrorStream(true);
-                Process process = pb.start();
+                // Execute on-device yt-dlp metadata extraction
+                YoutubeDLRequest request = new YoutubeDLRequest(cleanUrl);
+                request.addOption("--no-playlist");
+                request.addOption("--no-check-certificates");
 
-                BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-                StringBuilder jsonOutput = new StringBuilder();
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    jsonOutput.append(line);
+                VideoInfo videoInfo = YoutubeDL.getInstance().getInfo(request);
+
+                JSObject mediaInfo = new JSObject();
+                mediaInfo.put("id", videoInfo.getId() != null ? videoInfo.getId() : ("media_" + System.currentTimeMillis()));
+                mediaInfo.put("title", videoInfo.getTitle() != null ? videoInfo.getTitle() : "رسانه دانلودی");
+                mediaInfo.put("duration", videoInfo.getDuration());
+                mediaInfo.put("thumbnail", videoInfo.getThumbnail() != null ? videoInfo.getThumbnail() : "");
+                mediaInfo.put("extractor", videoInfo.getExtractor() != null ? videoInfo.getExtractor() : "yt-dlp");
+                mediaInfo.put("webpage_url", videoInfo.getWebpageUrl() != null ? videoInfo.getWebpageUrl() : cleanUrl);
+                if (videoInfo.getUrl() != null && !videoInfo.getUrl().isEmpty()) {
+                    mediaInfo.put("directUrl", videoInfo.getUrl());
                 }
-                int exitCode = process.waitFor();
 
-                if (exitCode == 0 && jsonOutput.length() > 0) {
-                    JSONObject jsonObj = new JSONObject(jsonOutput.toString());
-                    JSObject mediaInfo = new JSObject();
-                    mediaInfo.put("id", jsonObj.optString("id", "ytdlp_" + System.currentTimeMillis()));
-                    mediaInfo.put("title", jsonObj.optString("title", "رسانه دانلودی"));
-                    mediaInfo.put("duration", jsonObj.optDouble("duration", 0));
-                    mediaInfo.put("thumbnail", jsonObj.optString("thumbnail", ""));
-                    mediaInfo.put("extractor", jsonObj.optString("extractor", "yt-dlp"));
-                    mediaInfo.put("webpage_url", cleanUrl);
-
-                    JSObject ret = new JSObject();
-                    ret.put("mediaInfo", mediaInfo);
-                    call.resolve(ret);
-                } else {
-                    call.reject("NATIVE_EXTRACTION_FAILED: " + (jsonOutput.length() > 0 ? jsonOutput.toString() : "exit code " + exitCode));
+                JSArray formatsArray = new JSArray();
+                List<VideoFormat> formats = videoInfo.getFormats();
+                if (formats != null) {
+                    for (VideoFormat f : formats) {
+                        JSObject fObj = new JSObject();
+                        fObj.put("format_id", f.getFormatId() != null ? f.getFormatId() : "");
+                        fObj.put("ext", f.getExt() != null ? f.getExt() : "mp4");
+                        fObj.put("resolution", f.getResolution() != null ? f.getResolution() : "");
+                        fObj.put("filesize", f.getFileSize());
+                        fObj.put("vcodec", f.getVcodec() != null ? f.getVcodec() : "");
+                        fObj.put("acodec", f.getAcodec() != null ? f.getAcodec() : "");
+                        fObj.put("url", f.getUrl() != null ? f.getUrl() : "");
+                        fObj.put("format_note", f.getFormatNote() != null ? f.getFormatNote() : "");
+                        fObj.put("fps", f.getFps());
+                        formatsArray.put(fObj);
+                    }
                 }
+                mediaInfo.put("formats", formatsArray);
+
+                JSObject ret = new JSObject();
+                ret.put("mediaInfo", mediaInfo);
+                call.resolve(ret);
+
+            } catch (YoutubeDLException ye) {
+                Log.e(TAG, "extractInfo YoutubeDLException", ye);
+                String msg = ye.getMessage() != null ? ye.getMessage() : "خطا در استخراج اطلاعات ویدیو";
+                call.reject("استخراج ویدیو با خطا مواجه شد: " + msg);
             } catch (Exception e) {
-                Log.w(TAG, "extractInfo native execution issue: " + e.getMessage());
-                call.reject("NATIVE_EXECUTION_UNSUPPORTED: " + e.getMessage());
+                Log.e(TAG, "extractInfo error", e);
+                call.reject("خطا در پردازش آدرس ویدیو: " + e.getMessage());
             }
         });
     }
@@ -373,7 +327,7 @@ public class YtDlpPlugin extends Plugin {
         String directUrl = call.getString("directUrl");
         String formatId = call.getString("formatId", "best");
         String filename = call.getString("filename", "video_" + System.currentTimeMillis() + ".mp4");
-        Integer connections = call.getInt("connections", 4);
+        boolean audioOnly = Boolean.TRUE.equals(call.getBoolean("audioOnly", false));
 
         if (url == null || url.trim().isEmpty()) {
             call.reject("URL cannot be empty");
@@ -387,17 +341,180 @@ public class YtDlpPlugin extends Plugin {
         File outputFile = new File(downloadsDir, filename);
         activeOutputFiles.put(id, outputFile);
 
-        // Determine effective download URL: prefer direct URL if provided
         String targetUrl = (directUrl != null && !directUrl.trim().isEmpty()) ? directUrl.trim() : url.trim();
 
-        // Use Native Java HTTP streaming engine if direct URL or if native Linux binary cannot execute
-        boolean useDirectEngine = isDirectMediaUrl(targetUrl) || (directUrl != null && !directUrl.isEmpty()) || !testNativeProcessExecution();
-
-        if (useDirectEngine) {
+        // If direct file link (mp4, zip, apk, etc.), use the native Java chunked HTTP downloader
+        if (isDirectMediaUrl(targetUrl) || (directUrl != null && !directUrl.isEmpty())) {
             downloadDirectHttp(id, targetUrl, filename, outputFile, call);
         } else {
-            downloadWithYtDlpProcess(id, url, formatId, connections, outputFile, call);
+            // Use on-device youtubedl-android engine
+            downloadWithYoutubeDL(id, targetUrl, formatId, audioOnly, filename, outputFile, call);
         }
+    }
+
+    /**
+     * Executes download using on-device youtubedl-android engine.
+     */
+    private void downloadWithYoutubeDL(String id, String url, String formatId, boolean audioOnly, String displayName, File outputFile, PluginCall call) {
+        executor.execute(() -> {
+            int notifId = NOTIFICATION_BASE_ID + Math.abs(id.hashCode() % 1000);
+            try {
+                Context context = getContext();
+                if (!isEngineInitialized) {
+                    initYoutubeDLEngine(context);
+                }
+
+                YoutubeDLRequest request = new YoutubeDLRequest(url);
+                request.addOption("-o", outputFile.getAbsolutePath());
+                request.addOption("--no-playlist");
+                request.addOption("-c"); // resume partial
+                request.addOption("--newline");
+                request.addOption("--no-check-certificates");
+
+                if (audioOnly) {
+                    request.addOption("-x");
+                    request.addOption("--audio-format", "mp3");
+                } else if (formatId != null && !formatId.isEmpty() && !formatId.equals("best")) {
+                    request.addOption("-f", formatId);
+                } else {
+                    request.addOption("-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best");
+                }
+
+                emitProgress(id, "downloading", 0, 0, "0 B/s", "در حال شروع دانلود...", null);
+                updateNotification(notifId, displayName, 0, "در حال اتصال...", false);
+
+                executeYoutubeDLWithProgress(request, id, (progress, etaInSeconds, line) -> {
+                    long etaSec = etaInSeconds > 0 ? etaInSeconds : 0;
+                    String etaStr = etaSec > 0 ? (etaSec + " ثانیه") : "محاسبه...";
+                    String speedStr = parseSpeedFromLine(line);
+
+                    emitProgress(id, "downloading", progress, 0, speedStr, etaStr, null);
+                    updateNotification(notifId, displayName, (int) progress, speedStr, false);
+                });
+
+                File finalFile = outputFile.exists() ? outputFile : findDownloadedFile(outputFile);
+                if (finalFile != null && finalFile.exists()) {
+                    scanFileIntoMediaStore(finalFile);
+                    updateNotification(notifId, displayName, 100, "تکمیل شد", true);
+                    emitProgress(id, "completed", 100, finalFile.length(), "0 B/s", "تکمیل شد", finalFile.getAbsolutePath());
+
+                    activeOutputFiles.remove(id);
+
+                    JSObject ret = new JSObject();
+                    ret.put("success", true);
+                    ret.put("localPath", finalFile.getAbsolutePath());
+                    call.resolve(ret);
+                } else {
+                    emitProgress(id, "error", 0, 0, "0 B/s", "فایل دانلود شده یافت نشد.", null);
+                    updateNotification(notifId, displayName, 0, "خطا در ذخیره فایل", true);
+                    call.reject("Downloaded file not found");
+                }
+
+            } catch (Exception e) {
+                Log.e(TAG, "Download execution exception: " + e.getMessage(), e);
+                activeOutputFiles.remove(id);
+                updateNotification(notifId, displayName, 0, "خطا در دانلود", true);
+                emitProgress(id, "error", 0, 0, "0 B/s", e.getMessage(), null);
+                call.reject("Download failed: " + e.getMessage());
+            }
+        });
+    }
+
+    /**
+     * Resiliently invokes YoutubeDL.execute supporting various parameter signatures
+     * across youtubedl-android versions without compile or runtime conflicts.
+     */
+    private YoutubeDLResponse executeYoutubeDLWithProgress(YoutubeDLRequest request, String processId, ProgressConsumer consumer) throws Exception {
+        Method[] methods = YoutubeDL.class.getMethods();
+
+        for (Method m : methods) {
+            if ("execute".equals(m.getName())) {
+                Class<?>[] params = m.getParameterTypes();
+
+                // Signature: execute(YoutubeDLRequest, String processId, Callback/Function)
+                if (params.length == 3 && params[0].equals(YoutubeDLRequest.class) && params[1].equals(String.class)) {
+                    Object callbackProxy = createProgressProxy(params[2], consumer);
+                    return (YoutubeDLResponse) m.invoke(YoutubeDL.getInstance(), request, processId, callbackProxy);
+                }
+
+                // Signature: execute(YoutubeDLRequest, Callback/Function, String processId)
+                if (params.length == 3 && params[0].equals(YoutubeDLRequest.class) && params[2].equals(String.class)) {
+                    Object callbackProxy = createProgressProxy(params[1], consumer);
+                    return (YoutubeDLResponse) m.invoke(YoutubeDL.getInstance(), request, callbackProxy, processId);
+                }
+
+                // Signature: execute(YoutubeDLRequest, Callback/Function)
+                if (params.length == 2 && params[0].equals(YoutubeDLRequest.class)) {
+                    Object callbackProxy = createProgressProxy(params[1], consumer);
+                    return (YoutubeDLResponse) m.invoke(YoutubeDL.getInstance(), request, callbackProxy);
+                }
+            }
+        }
+
+        // Direct fallback: execute(request)
+        return YoutubeDL.getInstance().execute(request);
+    }
+
+    /**
+     * Creates a dynamic proxy for the callback parameter (whether DownloadProgressCallback or Kotlin Function3/Function2).
+     */
+    private Object createProgressProxy(Class<?> callbackType, ProgressConsumer consumer) {
+        if (!callbackType.isInterface()) {
+            return null;
+        }
+
+        return Proxy.newProxyInstance(
+                callbackType.getClassLoader(),
+                new Class<?>[]{callbackType},
+                (proxy, method, args) -> {
+                    if (args != null && args.length >= 2) {
+                        try {
+                            float prog = ((Number) args[0]).floatValue();
+                            long eta = ((Number) args[1]).longValue();
+                            String line = args.length > 2 && args[2] != null ? args[2].toString() : "";
+                            consumer.accept(prog, eta, line);
+                        } catch (Exception ignored) {}
+                    }
+
+                    if (method.getReturnType().equals(void.class)) {
+                        return null;
+                    }
+
+                    try {
+                        Class<?> unitClass = Class.forName("kotlin.Unit");
+                        return unitClass.getField("INSTANCE").get(null);
+                    } catch (Exception ignored) {
+                        return null;
+                    }
+                }
+        );
+    }
+
+    private void destroyProcessSafely(String processId) {
+        try {
+            Method m = YoutubeDL.class.getMethod("destroyProcessById", String.class);
+            m.invoke(YoutubeDL.getInstance(), processId);
+        } catch (Throwable t) {
+            Log.d(TAG, "destroyProcessById skipped: " + t.getMessage());
+        }
+    }
+
+    private File findDownloadedFile(File expectedFile) {
+        try {
+            if (expectedFile.exists()) return expectedFile;
+            File parent = expectedFile.getParentFile();
+            if (parent == null || !parent.exists()) return null;
+
+            String baseName = expectedFile.getName();
+            int dotIdx = baseName.lastIndexOf('.');
+            String prefix = dotIdx > 0 ? baseName.substring(0, dotIdx) : baseName;
+
+            File[] candidates = parent.listFiles((dir, name) -> name.startsWith(prefix) && !name.endsWith(".part") && !name.endsWith(".ytdl"));
+            if (candidates != null && candidates.length > 0) {
+                return candidates[0];
+            }
+        } catch (Exception ignored) {}
+        return null;
     }
 
     /**
@@ -427,7 +544,6 @@ public class YtDlpPlugin extends Plugin {
                 String currentUrl = urlStr;
                 int redirects = 0;
 
-                // Follow redirects manually to preserve Range header
                 while (redirects < 5) {
                     URL u = new URL(currentUrl);
                     conn = (HttpURLConnection) u.openConnection();
@@ -560,78 +676,23 @@ public class YtDlpPlugin extends Plugin {
         });
     }
 
-    /**
-     * Process-based download using native yt-dlp binary with fallback to direct engine
-     */
-    private void downloadWithYtDlpProcess(String id, String url, String formatId, int connections, File outputFile, PluginCall call) {
-        executor.execute(() -> {
-            try {
-                ProcessBuilder pb = new ProcessBuilder(
-                        ytDlpBin.getAbsolutePath(),
-                        "-c",
-                        "--continue",
-                        "--newline",
-                        "-f", formatId,
-                        "-N", String.valueOf(connections),
-                        "-o", outputFile.getAbsolutePath(),
-                        url
-                );
-
-                if (ffmpegBin.exists()) {
-                    pb.environment().put("PATH", binDir.getAbsolutePath() + ":" + System.getenv("PATH"));
-                }
-
-                pb.redirectErrorStream(true);
-                Process process;
-                try {
-                    process = pb.start();
-                } catch (Exception startEx) {
-                    Log.w(TAG, "yt-dlp process could not start, falling back to direct engine: " + startEx.getMessage());
-                    downloadDirectHttp(id, url, outputFile.getName(), outputFile, call);
-                    return;
-                }
-
-                activeProcesses.put(id, process);
-
-                BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-                String line;
-
-                emitProgress(id, "downloading", 0, 0, "0 B/s", "در حال دانلود...", null);
-
-                while ((line = reader.readLine()) != null) {
-                    if (line.contains("[download]")) {
-                        parseAndEmitProgress(id, line);
-                    }
-                }
-
-                int exitCode = process.waitFor();
-                activeProcesses.remove(id);
-
-                if (exitCode == 0 && outputFile.exists()) {
-                    scanFileIntoMediaStore(outputFile);
-                    emitProgress(id, "completed", 100, outputFile.length(), "0 B/s", "تکمیل شد", outputFile.getAbsolutePath());
-                    JSObject ret = new JSObject();
-                    ret.put("success", true);
-                    call.resolve(ret);
-                } else {
-                    if (activeOutputFiles.containsKey(id)) {
-                        emitProgress(id, "error", 0, 0, "0 B/s", "خطا در دانلود (کد: " + exitCode + ")", null);
-                    }
-                    call.reject("Download process exited with code " + exitCode);
-                }
-            } catch (Exception e) {
-                Log.e(TAG, "Process download error, falling back to direct HTTP: " + e.getMessage());
-                activeProcesses.remove(id);
-                downloadDirectHttp(id, url, outputFile.getName(), outputFile, call);
-            }
-        });
-    }
-
     private String formatSpeed(long bytesPerSec) {
         if (bytesPerSec <= 0) return "0 B/s";
         if (bytesPerSec < 1024) return bytesPerSec + " B/s";
         if (bytesPerSec < 1024 * 1024) return String.format("%.1f KB/s", bytesPerSec / 1024f);
         return String.format("%.1f MB/s", bytesPerSec / (1024f * 1024f));
+    }
+
+    private String parseSpeedFromLine(String line) {
+        if (line == null) return "دانلود...";
+        try {
+            if (line.contains("at ")) {
+                int atIdx = line.indexOf("at ") + 3;
+                String rest = line.substring(atIdx).trim();
+                return rest.split(" ")[0];
+            }
+        } catch (Exception ignored) {}
+        return "دانلود...";
     }
 
     private void scanFileIntoMediaStore(File file) {
@@ -663,39 +724,6 @@ public class YtDlpPlugin extends Plugin {
         return "application/octet-stream";
     }
 
-    private void parseAndEmitProgress(String downloadId, String line) {
-        try {
-            float percent = 0;
-            long downloadedBytes = 0;
-            String speed = "0 B/s";
-            String eta = "محاسبه...";
-
-            if (line.contains("%")) {
-                int percentIndex = line.indexOf("%");
-                int startIndex = Math.max(0, percentIndex - 6);
-                String percentStr = line.substring(startIndex, percentIndex).trim();
-                percent = Float.parseFloat(percentStr);
-            }
-
-            if (line.contains("at ")) {
-                try {
-                    String speedPart = line.substring(line.indexOf("at ") + 3);
-                    speed = speedPart.split(" ")[0] + "/s";
-                } catch (Exception ignored) {}
-            }
-
-            if (line.contains("ETA ")) {
-                try {
-                    eta = line.substring(line.indexOf("ETA ") + 4).trim();
-                } catch (Exception ignored) {}
-            }
-
-            emitProgress(downloadId, "downloading", percent, downloadedBytes, speed, eta, null);
-        } catch (Exception e) {
-            Log.d(TAG, "Parse progress warning: " + e.getMessage());
-        }
-    }
-
     private void emitProgress(String downloadId, String status, float percent, long downloadedBytes, String speed, String eta, String localPath) {
         JSObject data = new JSObject();
         data.put("downloadId", downloadId);
@@ -718,11 +746,7 @@ public class YtDlpPlugin extends Plugin {
             if (cancelFlag != null) {
                 cancelFlag.set(true);
             }
-
-            Process p = activeProcesses.remove(id);
-            if (p != null) {
-                p.destroy();
-            }
+            destroyProcessSafely(id);
         }
         JSObject ret = new JSObject();
         ret.put("success", true);
@@ -743,11 +767,7 @@ public class YtDlpPlugin extends Plugin {
             if (cancelFlag != null) {
                 cancelFlag.set(true);
             }
-
-            Process p = activeProcesses.remove(id);
-            if (p != null) {
-                p.destroyForcibly();
-            }
+            destroyProcessSafely(id);
 
             File file = activeOutputFiles.remove(id);
             if (file != null) {

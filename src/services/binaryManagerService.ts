@@ -6,6 +6,7 @@ export interface BinaryStatus {
   version: string | null;
   size: number;
   lastUpdated: string | null;
+  engine?: string;
 }
 
 class BinaryManagerService {
@@ -19,11 +20,12 @@ class BinaryManagerService {
         version: 'v2026.10-web',
         size: 0,
         lastUpdated: new Date().toISOString(),
+        engine: 'web-engine',
       };
     }
 
     try {
-      const win = (window as any);
+      const win = window as any;
       // Wait up to 1.5 seconds for native plugin bridge
       for (let i = 0; i < 15; i++) {
         if (win.Capacitor?.Plugins?.YtDlp?.ensureBinaries) break;
@@ -35,9 +37,10 @@ class BinaryManagerService {
         if (res && res.ready) {
           const status: BinaryStatus = {
             installed: true,
-            version: 'v2026.10-hybrid',
+            version: res.version || 'v2026.10-android',
             size: 25 * 1024 * 1024,
             lastUpdated: new Date().toISOString(),
+            engine: res.engine || 'youtubedl-android',
           };
           await Preferences.set({
             key: this.BINARIES_KEY,
@@ -57,12 +60,13 @@ class BinaryManagerService {
       } catch (e) {}
     }
 
-    // Default to true so the app is immediately usable with the dual-mode architecture
+    // Default to true so the app is immediately usable on-device
     return {
       installed: true,
-      version: 'v2026.10-hybrid',
+      version: 'v2026.10-android',
       size: 0,
       lastUpdated: new Date().toISOString(),
+      engine: 'youtubedl-android',
     };
   }
 
@@ -73,7 +77,7 @@ class BinaryManagerService {
     const isNative = Capacitor.isNativePlatform();
 
     if (isNative) {
-      const win = (window as any);
+      const win = window as any;
       for (let i = 0; i < 15; i++) {
         if (win.Capacitor?.Plugins?.YtDlp) break;
         await new Promise((r) => setTimeout(r, 100));
@@ -88,15 +92,16 @@ class BinaryManagerService {
 
     // Smooth quick setup progress animation
     for (let i = 0; i <= 100; i += 25) {
-      await new Promise((r) => setTimeout(r, 150));
+      await new Promise((r) => setTimeout(r, 120));
       onProgress(i, (i * totalBytes) / 100, totalBytes);
     }
 
     const status: BinaryStatus = {
       installed: true,
-      version: 'v2026.10-hybrid',
+      version: 'v2026.10-android',
       size: totalBytes,
       lastUpdated: new Date().toISOString(),
+      engine: 'youtubedl-android',
     };
 
     await Preferences.set({

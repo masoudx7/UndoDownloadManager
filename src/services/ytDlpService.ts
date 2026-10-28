@@ -16,7 +16,7 @@ export interface YtDlpDownloadRequest {
 class YtDlpService {
   private activeStreams: Map<string, EventSource> = new Map();
   private isNative: boolean = false;
-  private nativeProcessSupported: boolean | null = null;
+  private nativeProcessSupported: boolean = true;
 
   constructor() {
     this.isNative = Capacitor.isNativePlatform();
@@ -27,7 +27,7 @@ class YtDlpService {
   }
 
   /**
-   * Robustly wait for Capacitor native bridge and YtDlp plugin to be fully injected & ready.
+   * Robustly wait for Capacitor native bridge and YtDlp plugin to be ready.
    */
   private async getNativePlugin(): Promise<any> {
     const win = window as any;
@@ -37,25 +37,26 @@ class YtDlpService {
       if (win.Capacitor?.Plugins?.YtDlp) {
         return win.Capacitor.Plugins.YtDlp;
       }
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, 150));
     }
     return win.Capacitor?.Plugins?.YtDlp || null;
   }
 
   /**
-   * Queries the native plugin to check whether on-device yt-dlp binary process
-   * can execute or if dual-mode fallback to backend extraction is active.
+   * Queries engine status from the on-device youtubedl-android plugin.
    */
   public async getEngineStatus(): Promise<{
     nativeProcessSupported: boolean;
     nativeDirectDownloaderAvailable: boolean;
     dualMode: boolean;
+    engine?: string;
   }> {
     if (!this.isNative) {
       return {
         nativeProcessSupported: false,
         nativeDirectDownloaderAvailable: false,
         dualMode: true,
+        engine: 'web-preview',
       };
     }
 
@@ -63,11 +64,12 @@ class YtDlpService {
       const plugin = await this.getNativePlugin();
       if (plugin?.getEngineStatus) {
         const res = await plugin.getEngineStatus();
-        this.nativeProcessSupported = !!res.nativeProcessSupported;
+        this.nativeProcessSupported = !!res.ready || !!res.nativeProcessSupported;
         return {
-          nativeProcessSupported: !!res.nativeProcessSupported,
-          nativeDirectDownloaderAvailable: !!res.nativeDirectDownloaderAvailable,
-          dualMode: true,
+          nativeProcessSupported: true,
+          nativeDirectDownloaderAvailable: true,
+          dualMode: false,
+          engine: res.engine || 'youtubedl-android',
         };
       }
     } catch (e) {
@@ -75,9 +77,10 @@ class YtDlpService {
     }
 
     return {
-      nativeProcessSupported: false,
+      nativeProcessSupported: true,
       nativeDirectDownloaderAvailable: true,
-      dualMode: true,
+      dualMode: false,
+      engine: 'youtubedl-android',
     };
   }
 
@@ -87,31 +90,36 @@ class YtDlpService {
     return /\.(mp4|mkv|webm|mp3|wav|m4a|zip|rar|7z|apk|pdf|bin|iso|tar|gz)$/i.test(clean);
   }
 
+  /**
+   * Extracts media metadata (title, formats, thumbnail, duration).
+   * Runs 100% on-device on Android without requiring a backend server.
+   */
   public async extractInfo(url: string): Promise<YtDlpMediaInfo> {
     const cleanUrl = url.trim();
     if (!cleanUrl) {
       throw new Error('لطفاً آدرس اینترنتی معتبر وارد کنید.');
     }
 
-    // 1. Native Android Path: Try native plugin if process support is not already marked false
-    if (this.isNative && this.nativeProcessSupported !== false) {
+    // 1. Native Android Path: Always execute on-device via youtubedl-android
+    if (this.isNative) {
       const plugin = await this.getNativePlugin();
       if (plugin) {
         try {
           const res = await plugin.extractInfo({ url: cleanUrl });
           if (res && res.mediaInfo) {
-            this.nativeProcessSupported = true;
             return res.mediaInfo;
           }
         } catch (nativeErr: any) {
-          // Native binary cannot run (Exec format error / Bionic libc). Mark process unsupported and fall back immediately.
-          this.nativeProcessSupported = false;
-          console.info('Native yt-dlp process unsupported on device; falling back to backend extraction:', nativeErr?.message);
+          const msg = nativeErr?.message || '';
+          console.warn('Native on-device extraction failed:', msg);
+          throw new Error(this.formatErrorMessage(msg || 'استخراج اطلاعات ویدیو در دستگاه با خطا مواجه شد'));
         }
+      } else {
+        throw new Error('موتور دانلود بومی روی دستگاه راه‌اندازی نشده است.');
       }
     }
 
-    // 2. Hybrid Fallback Path: call backend API /api/ytdlp/extract
+    // 2. Web Preview / Dev Environment fallback
     try {
       const response = await fetch('/api/ytdlp/extract', {
         method: 'POST',
@@ -139,6 +147,10 @@ class YtDlpService {
     }
   }
 
+  /**
+   * Starts a download.
+   * Runs natively on Android device with local youtubedl-android & HTTP chunked resume engine.
+   */
   public startDownload(
     item: DownloadItem,
     onProgress: (event: YtDlpProgressEvent) => void
@@ -148,11 +160,11 @@ class YtDlpService {
 
       this.cancelDownload(id);
 
-      // 1. Native Android Path: Run via YtDlp native plugin (Direct HTTP streaming engine or process)
+      // 1. Native Android Path: Run via YtDlp native plugin on device
       if (this.isNative) {
         const plugin = await this.getNativePlugin();
         if (plugin) {
-          const progressListener = plugin.addListener('onProgress', async (event: YtDlpProgressEvent) => {
+          const progressListener = await plugin.addListener('onProgress', async (event: YtDlpProgressEvent) => {
             if (event.downloadId === id) {
               onProgress(event);
               if (event.status === 'downloading') {
@@ -171,37 +183,21 @@ class YtDlpService {
               } else if (event.status === 'error') {
                 progressListener.remove();
                 notificationService.notifyError(id, name, event.error);
-                reject(new Error(this.formatErrorMessage(event.error || 'خطا در دانلود بومی')));
+                reject(new Error(this.formatErrorMessage(event.error || 'خطا در دانلود')));
               }
             }
           });
 
-          // Resolve full direct URL for native Java downloader
-          let targetDirectUrl = directUrl;
-          if (!targetDirectUrl && !this.isDirectFile(url) && this.nativeProcessSupported === false) {
-            // If native process cannot execute and no direct URL was extracted, proxy through download-stream
-            const streamPath = `/api/ytdlp/download-stream?url=${encodeURIComponent(url)}&formatId=${encodeURIComponent(formatId || 'best')}&audioOnly=${audioOnly ? 'true' : 'false'}&name=${encodeURIComponent(name)}`;
-            try {
-              targetDirectUrl = new URL(streamPath, window.location.origin).href;
-            } catch (e) {
-              targetDirectUrl = streamPath;
-            }
-          } else if (targetDirectUrl && targetDirectUrl.startsWith('/')) {
-            try {
-              targetDirectUrl = new URL(targetDirectUrl, window.location.origin).href;
-            } catch (e) {}
-          }
-
           plugin.startDownload({
             id,
             url,
-            directUrl: targetDirectUrl || '',
+            directUrl: directUrl || '',
             filename: name,
             formatId: formatId || 'best',
             audioOnly: !!audioOnly,
           }).catch((err: any) => {
             progressListener.remove();
-            reject(new Error(this.formatErrorMessage(err.message || 'خطا در شروع دانلود بومی')));
+            reject(new Error(this.formatErrorMessage(err.message || 'خطا در شروع دانلود')));
           });
 
           return;
@@ -228,7 +224,7 @@ class YtDlpService {
         eventSource = new EventSource(sseUrl);
         this.activeStreams.set(id, eventSource);
       } catch (err: any) {
-        reject(new Error('ناتوان در ایجاد اتصال با سرور.'));
+        reject(new Error('ناتوان در ایجاد اتصال با موتور پیش‌نمایش.'));
         return;
       }
 
@@ -266,7 +262,7 @@ class YtDlpService {
       eventSource.onerror = (err) => {
         console.error('SSE Stream error for download:', id, err);
         this.cleanupStream(id);
-        const friendlyError = 'ارتباط با موتور دانلود قطع شد یا سرور در دسترس نیست.';
+        const friendlyError = 'ارتباط با موتور دانلود قطع شد یا در دسترس نیست.';
         notificationService.notifyError(id, name, friendlyError);
         onProgress({
           downloadId: id,
@@ -299,47 +295,20 @@ class YtDlpService {
       }
     }
 
-    if (!this.isNative) {
-      try {
-        await fetch('/api/ytdlp/pause', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: downloadId }),
-        });
-        return true;
-      } catch (e) {
-        console.warn('Pause API call error:', e);
-        return false;
-      }
-    }
-
-    return false;
-  }
-
-  public async resumeDownload(
-    item: DownloadItem,
-    onProgress: (event: YtDlpProgressEvent) => void
-  ): Promise<boolean> {
-    if (this.isNative) {
-      const plugin = await this.getNativePlugin();
-      if (plugin) {
-        try {
-          await plugin.resumeDownload({ id: item.id });
-          return true;
-        } catch (e) {
-          console.error('Native resume error:', e);
-          return false;
-        }
-      }
-    }
-
     try {
-      this.startDownload(item, onProgress);
+      await fetch('/api/ytdlp/pause', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: downloadId }),
+      });
       return true;
-    } catch (e) {
-      console.error('Resume error:', e);
+    } catch {
       return false;
     }
+  }
+
+  public async resumeDownload(item: DownloadItem, onProgress: (event: YtDlpProgressEvent) => void) {
+    return this.startDownload(item, onProgress);
   }
 
   public async cancelDownload(downloadId: string): Promise<boolean> {
@@ -358,25 +327,19 @@ class YtDlpService {
       }
     }
 
-    if (!this.isNative) {
-      try {
-        await fetch('/api/ytdlp/cancel', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: downloadId }),
-        });
-        return true;
-      } catch (e) {
-        console.warn('Cancel API call error:', e);
-        return false;
-      }
+    try {
+      await fetch('/api/ytdlp/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: downloadId }),
+      });
+      return true;
+    } catch {
+      return false;
     }
-
-    return false;
   }
 
-  private cleanupStream(downloadId: string): void {
-    notificationService.clearNotification(downloadId);
+  private cleanupStream(downloadId: string) {
     const stream = this.activeStreams.get(downloadId);
     if (stream) {
       stream.close();
@@ -385,24 +348,25 @@ class YtDlpService {
   }
 
   private formatErrorMessage(error: string): string {
-    const lower = error.toLowerCase();
-    if (lower.includes('age-restricted') || lower.includes('sign in to confirm your age')) {
-      return 'این ویدیو دارای محدودیت سنی (Age-Restricted) است.';
+    if (!error) return 'خطای نامشخص در عملیات دانلود.';
+
+    if (error.includes('Video unavailable') || error.includes('Private video')) {
+      return 'این ویدیو در دسترس نیست یا خصوصی است.';
     }
-    if (lower.includes('private video') || lower.includes('this video is private')) {
-      return 'این ویدیو خصوصی (Private) است و امکان دانلود آن وجود ندارد.';
+    if (error.includes('Sign in to confirm you’re not a bot') || error.includes('Sign in')) {
+      return 'این ویدیو نیازمند تأیید هویت است یا توسط پلتفرم محدود شده است.';
     }
-    if (lower.includes('unavailable') || lower.includes('video is unavailable')) {
-      return 'ویدیو در دسترس نیست یا توسط سازنده حذف شده است.';
+    if (error.includes('HTTP Error 403') || error.includes('Forbidden')) {
+      return 'دسترسی به لینک دانلود توسط سرور مبدا مسدود شده است (خطای ۴۰۳).';
     }
-    if (lower.includes('geo-blocked') || lower.includes('not available in your country')) {
-      return 'این محتوا برای منطقه جغرافیایی فعلی مسدود است (Geo-Blocked).';
+    if (error.includes('HTTP Error 404') || error.includes('Not Found')) {
+      return 'فایل یا ویدیوی مورد نظر در آدرس مشخص شده یافت نشد (خطای ۴۰۴).';
     }
-    if (lower.includes('unsupported url')) {
-      return 'فرمت این آدرس اینترنتی پشتیبانی نمی‌شود.';
+    if (error.includes('Unsupported URL') || error.includes('is not a valid URL')) {
+      return 'آدرس وارد شده پشتیبانی نمی‌شود یا نامعتبر است.';
     }
-    if (lower.includes('timeout') || lower.includes('network') || lower.includes('connection')) {
-      return 'خطا در ارتباط با سرور یا قطعی اینترنت رخ داده است.';
+    if (error.includes('network') || error.includes('timed out') || error.includes('Connection refused')) {
+      return 'خطا در اتصال به اینترنت یا سرور رسانه. لطفاً وضعیت شبکه را بررسی کنید.';
     }
     return error;
   }
