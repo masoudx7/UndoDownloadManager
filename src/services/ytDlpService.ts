@@ -31,8 +31,8 @@ class YtDlpService {
     const win = window as any;
     if (!this.isNative) return null;
 
-    // Retry up to 25 times (5 seconds total) for the native plugin bridge to initialize upon app launch
-    for (let i = 0; i < 25; i++) {
+    // Retry up to 30 times (6 seconds total) for the native plugin bridge to initialize upon app launch
+    for (let i = 0; i < 30; i++) {
       if (win.Capacitor?.Plugins?.YtDlp) {
         return win.Capacitor.Plugins.YtDlp;
       }
@@ -47,6 +47,7 @@ class YtDlpService {
       throw new Error('لطفاً آدرس اینترنتی معتبر وارد کنید.');
     }
 
+    // 1. Native Android Path: Try native plugin first
     if (this.isNative) {
       const plugin = await this.getNativePlugin();
       if (plugin) {
@@ -55,16 +56,15 @@ class YtDlpService {
           if (res && res.mediaInfo) {
             return res.mediaInfo;
           }
-          throw new Error('اطلاعاتی از پلاگین بومی دریافت نشد.');
         } catch (nativeErr: any) {
-          console.error('Native plugin extraction error:', nativeErr);
-          throw new Error(this.formatErrorMessage(nativeErr.message || 'خطا در استخراج اطلاعات بومی. لطفاً لینک را بررسی کنید.'));
+          console.warn('Native plugin extraction error, attempting backend proxy fallback:', nativeErr);
+          // If native plugin failed (e.g. Linux binary execution unsupported on this Android CPU),
+          // continue below to backend extraction fallback.
         }
-      } else {
-        throw new Error('پلاگین بومی روی این دستگاه بارگذاری نشده است.');
       }
     }
 
+    // 2. Web / Hybrid Fallback Path: call backend API /api/ytdlp/extract
     try {
       const response = await fetch('/api/ytdlp/extract', {
         method: 'POST',
@@ -88,7 +88,7 @@ class YtDlpService {
       if (fetchErr.message && fetchErr.message.includes('خطا')) {
         throw fetchErr;
       }
-      throw new Error('ارتباط با سرور محلی برقرار نشد. لطفاً از اجرای سرور بک‌اند مطمئن شوید یا نسخه اندروید را نصب کنید.');
+      throw new Error('امکان دریافت اطلاعات ویدیو وجود ندارد. لطفاً از اتصال اینترنت یا درستی آدرس اطمینان حاصل کنید.');
     }
   }
 
@@ -101,6 +101,7 @@ class YtDlpService {
 
       this.cancelDownload(id);
 
+      // 1. Native Android Path: Run via YtDlp native plugin (process or native Java HTTP engine)
       if (this.isNative) {
         const plugin = await this.getNativePlugin();
         if (plugin) {
@@ -123,7 +124,7 @@ class YtDlpService {
               } else if (event.status === 'error') {
                 progressListener.remove();
                 notificationService.notifyError(id, name, event.error);
-                reject(new Error(event.error || 'خطا در دانلود بومی'));
+                reject(new Error(this.formatErrorMessage(event.error || 'خطا در دانلود بومی')));
               }
             }
           });
@@ -136,16 +137,19 @@ class YtDlpService {
             audioOnly: !!audioOnly,
           }).catch((err: any) => {
             progressListener.remove();
-            reject(err);
+            reject(new Error(this.formatErrorMessage(err.message || 'خطا در شروع دانلود بومی')));
           });
 
           return;
         } else {
-          reject(new Error('پلاگین بومی روی این دستگاه در دسترس نیست.'));
+          // If native plugin is not loaded, notify with actionable message
+          const msg = 'پلاگین بومی روی این دستگاه در دسترس نیست. لطفاً آخرین نسخه نصبی APK را نصب کنید.';
+          reject(new Error(msg));
           return;
         }
       }
 
+      // 2. Web / Preview Path: Server-Sent Events (SSE) Stream
       const queryParams = new URLSearchParams({
         id,
         url,

@@ -10,5 +10,5 @@ node_modules/
 dist/
 
 # Native binaries
-android/app/src/main/assets/bin/yt-dlp
-android/app/src/main/assets/bin/ffmpeg
+android/app/src/main/assets/bin/*
+!android/app/src/main/assets/bin/.gitkeep

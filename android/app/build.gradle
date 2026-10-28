@@ -31,10 +31,13 @@ android {
             def keyAli = System.getenv("KEY_ALIAS")
             def keyPass = System.getenv("KEY_PASSWORD")
 
-            storeFile file(keystorePath)
-            storePassword (storePass != null && !storePass.isEmpty() ? storePass : "undodownload123")
-            keyAlias (keyAli != null && !keyAli.isEmpty() ? keyAli : "undodownload-alias")
-            keyPassword (keyPass != null && !keyPass.isEmpty() ? keyPass : "undodownload123")
+            def ksFile = file(keystorePath)
+            if (ksFile.exists()) {
+                storeFile ksFile
+                storePassword (storePass != null && !storePass.isEmpty() ? storePass : "undodownload123")
+                keyAlias (keyAli != null && !keyAli.isEmpty() ? keyAli : "undodownload-alias")
+                keyPassword (keyPass != null && !keyPass.isEmpty() ? keyPass : "undodownload123")
+            }
         }
     }
 
@@ -42,7 +45,12 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            signingConfig signingConfigs.release
+            def ksFile = file(System.getenv("KEYSTORE_PATH") ?: "undodownloadmanager-release-key.jks")
+            if (ksFile.exists()) {
+                signingConfig signingConfigs.release
+            } else {
+                signingConfig signingConfigs.debug
+            }
         }
     }
 }

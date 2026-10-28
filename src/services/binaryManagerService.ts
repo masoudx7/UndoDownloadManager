@@ -24,6 +24,12 @@ class BinaryManagerService {
 
     try {
       const win = (window as any);
+      // Wait up to 2.5 seconds for native plugin bridge if initializing
+      for (let i = 0; i < 25; i++) {
+        if (win.Capacitor?.Plugins?.YtDlp?.ensureBinaries) break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+
       if (win.Capacitor?.Plugins?.YtDlp?.ensureBinaries) {
         const res = await win.Capacitor.Plugins.YtDlp.ensureBinaries();
         if (res && res.ready) {
@@ -71,18 +77,28 @@ class BinaryManagerService {
     }
 
     const win = (window as any);
+    for (let i = 0; i < 25; i++) {
+      if (win.Capacitor?.Plugins?.YtDlp) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+
     if (win.Capacitor?.Plugins?.YtDlp) {
       const plugin = win.Capacitor.Plugins.YtDlp;
 
-      const listener = plugin.addListener('onBinaryProgress', (event: any) => {
-        if (event.progress !== undefined) {
-          onProgress(event.progress, event.downloadedBytes || 0, event.totalBytes || 39 * 1024 * 1024);
-        }
-      });
+      let listener: any = null;
+      if (plugin.addListener) {
+        listener = plugin.addListener('onBinaryProgress', (event: any) => {
+          if (event.progress !== undefined) {
+            onProgress(event.progress, event.downloadedBytes || 0, event.totalBytes || 39 * 1024 * 1024);
+          }
+        });
+      }
 
       try {
         await plugin.ensureBinaries();
-        listener.remove();
+        if (listener && listener.remove) {
+          listener.remove();
+        }
         const status: BinaryStatus = {
           installed: true,
           version: 'v2026.10-release',
@@ -94,9 +110,14 @@ class BinaryManagerService {
           value: JSON.stringify(status),
         });
       } catch (err) {
-        listener.remove();
+        if (listener && listener.remove) {
+          listener.remove();
+        }
         throw err;
       }
+    } else {
+      // If plugin not found on native, don't crash loop: mark as ready so user can access UI
+      console.warn('YtDlp plugin not detected on native device, skipping setup screen.');
     }
   }
 

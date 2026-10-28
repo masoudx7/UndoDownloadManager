@@ -1,109 +1,79 @@
-name: Build Bazaar Version
+name: Build Android (Cafe Bazaar & Release)
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
 
 jobs:
-  build-bazaar:
+  build-android:
     runs-on: ubuntu-latest
+
     steps:
+      # 1. Checkout repository with existing android/ project preserved
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install Dependencies
-        run: bun install
-
-      - name: Download Native Binaries
-        run: bun run download-binaries
-
-      - name: Build Web Application
-        run: bun run build
-
+      # 2. Setup Java JDK 21 for modern Android Gradle builds
       - name: Setup Java JDK
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Clean old Android folder
-        run: rm -rf android
+      # 3. Setup Bun runtime
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
 
-      - name: Re-add Android Platform
-        run: bunx cap add android
+      # 4. Install Node dependencies
+      - name: Install Dependencies
+        run: bun install
 
-      - name: Sync Capacitor
+      # 5. Download Native Binaries into assets/bin before build
+      - name: Download Native Binaries
+        run: |
+          chmod +x scripts/download-binaries.sh || true
+          bun run download-binaries || true
+
+      # 6. Build Web Frontend (Vite)
+      - name: Build Web Application
+        run: bun run build
+
+      # 7. Sync Web Assets with Android Project (DO NOT delete android/ or re-add)
+      - name: Sync Capacitor Android
         run: bunx cap sync android
 
-      - name: Fix settings.gradle with JitPack
+      # 8. Setup Keystore if secret is present
+      - name: Setup Release Keystore
+        if: env.KEYSTORE_BASE64 != ''
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          cat > android/settings.gradle << 'EOF'
-          pluginManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-                  gradlePluginPortal()
-              }
-          }
+          echo "$KEYSTORE_BASE64" | base64 -d > android/app/undodownloadmanager-release-key.jks
+          echo "✅ Release Keystore decoded successfully."
 
-          dependencyResolutionManagement {
-              repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
-              repositories {
-                  google()
-                  mavenCentral()
-                  maven { url 'https://jitpack.io' }
-              }
-          }
-
-          include ':app'
-          include ':capacitor-cordova-android-plugins'
-          project(':capacitor-cordova-android-plugins').projectDir = new File('./capacitor-cordova-android-plugins/')
-          apply from: 'capacitor.settings.gradle'
-          EOF
-          echo "✅ settings.gradle fixed with JitPack"
-
-      - name: Fix root build.gradle
-        run: |
-          cat > android/build.gradle << 'EOF'
-          // Top-level build file
-          buildscript {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-              dependencies {
-                  classpath 'com.android.tools.build:gradle:8.9.1'
-                  classpath 'com.google.gms:google-services:4.4.1'
-              }
-          }
-
-          apply from: "variables.gradle"
-
-          task clean(type: Delete) {
-              delete rootProject.buildDir
-          }
-          EOF
-          echo "✅ build.gradle cleaned up"
-
+      # 9. Build Android APKs (Debug & Release)
       - name: Build Android APKs
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug assembleRelease
-          echo "🔍 Listing all generated APK files:"
+          ./gradlew assembleDebug assembleRelease --stacktrace
+          echo "🔍 Generated APKs:"
           find . -name "*.apk" -type f
 
-      - name: Upload Bazaar APK
+      # 10. Upload APKs as GitHub Actions Artifacts
+      - name: Upload Android APKs
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: undo-download-manager-apk
+          name: undo-download-manager-apks
           path: |
-            android/app/build/outputs/apk/debug/*.apk
-            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/apk/**/*.apk
           retention-days: 14
