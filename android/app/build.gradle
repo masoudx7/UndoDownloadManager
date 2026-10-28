@@ -1,4 +1,5 @@
 apply plugin: 'com.android.application'
+apply plugin: 'org.jetbrains.kotlin.android'
 
 android {
     namespace "com.undodownloadmanager.app"
@@ -13,7 +14,7 @@ android {
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         
         ndk {
-            abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64'
+            abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64', 'x86'
         }
 
         manifestPlaceholders = [
@@ -28,16 +29,42 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
     }
 
-    packagingOptions {
-        pickFirst 'lib/*/libpython*.so'
-        pickFirst 'lib/*/libffmpeg*.so'
-        pickFirst 'lib/*/libcrypto*.so'
-        pickFirst 'lib/*/libssl*.so'
-        pickFirst 'lib/*/libc++_shared.so'
+    kotlinOptions {
+        jvmTarget = '21'
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+            pickFirsts += [
+                '**/libc++_shared.so',
+                '**/libpython*.so',
+                '**/libffmpeg*.so',
+                '**/libcrypto*.so',
+                '**/libssl*.so',
+                'lib/arm64-v8a/libc++_shared.so',
+                'lib/armeabi-v7a/libc++_shared.so',
+                'lib/x86_64/libc++_shared.so',
+                'lib/x86/libc++_shared.so'
+            ]
+        }
+        resources {
+            excludes += [
+                'META-INF/DEPENDENCIES',
+                'META-INF/LICENSE',
+                'META-INF/LICENSE.txt',
+                'META-INF/license.txt',
+                'META-INF/NOTICE',
+                'META-INF/NOTICE.txt',
+                'META-INF/notice.txt',
+                'META-INF/ASL2.0',
+                'META-INF/*.kotlin_module'
+            ]
+        }
     }
 
     signingConfigs {
@@ -84,6 +111,9 @@ dependencies {
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
     
+    // Kotlin Standard Library
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlinVersion"
+
     // On-device Android yt-dlp & ffmpeg engine (Bionic libc & NDK)
     implementation 'io.github.junkfood02.youtubedl-android:library:0.18.1'
     implementation 'io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1'

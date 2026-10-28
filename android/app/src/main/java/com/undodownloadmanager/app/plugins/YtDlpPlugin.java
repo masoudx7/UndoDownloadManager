@@ -316,7 +316,10 @@ public class YtDlpPlugin extends Plugin {
                 try {
                     videoInfo = YoutubeDL.getInstance().getInfo(request);
                 } catch (Throwable t) {
-                    videoInfo = YoutubeDL.getInstance().getInfo(cleanUrl);
+                    Log.w(TAG, "Full request getInfo failed, retrying with simple request: " + t.getMessage());
+                    YoutubeDLRequest simpleRequest = new YoutubeDLRequest(cleanUrl);
+                    simpleRequest.addOption("--no-playlist");
+                    videoInfo = YoutubeDL.getInstance().getInfo(simpleRequest);
                 }
 
                 if (videoInfo == null) {
@@ -348,17 +351,19 @@ public class YtDlpPlugin extends Plugin {
                 List<VideoFormat> formats = videoInfo.getFormats();
                 if (formats != null) {
                     for (VideoFormat f : formats) {
-                        JSObject fObj = new JSObject();
-                        fObj.put("format_id", f.getFormatId() != null ? f.getFormatId() : "");
-                        fObj.put("ext", f.getExt() != null ? f.getExt() : "mp4");
-                        fObj.put("resolution", f.getResolution() != null ? f.getResolution() : "");
-                        fObj.put("filesize", f.getFileSize());
-                        fObj.put("vcodec", f.getVcodec() != null ? f.getVcodec() : "");
-                        fObj.put("acodec", f.getAcodec() != null ? f.getAcodec() : "");
-                        fObj.put("url", f.getUrl() != null ? f.getUrl() : "");
-                        fObj.put("format_note", f.getFormatNote() != null ? f.getFormatNote() : "");
-                        fObj.put("fps", f.getFps());
-                        formatsArray.put(fObj);
+                        try {
+                            JSObject fObj = new JSObject();
+                            fObj.put("format_id", f.getFormatId() != null ? f.getFormatId() : "");
+                            fObj.put("ext", f.getExt() != null ? f.getExt() : "mp4");
+                            fObj.put("resolution", f.getResolution() != null ? f.getResolution() : "");
+                            try { fObj.put("filesize", f.getFileSize()); } catch (Throwable ignored) { fObj.put("filesize", 0); }
+                            fObj.put("vcodec", f.getVcodec() != null ? f.getVcodec() : "");
+                            fObj.put("acodec", f.getAcodec() != null ? f.getAcodec() : "");
+                            fObj.put("url", f.getUrl() != null ? f.getUrl() : "");
+                            fObj.put("format_note", f.getFormatNote() != null ? f.getFormatNote() : "");
+                            try { fObj.put("fps", f.getFps()); } catch (Throwable ignored) { fObj.put("fps", 0); }
+                            formatsArray.put(fObj);
+                        } catch (Throwable ignored) {}
                     }
                 }
                 mediaInfo.put("formats", formatsArray);
