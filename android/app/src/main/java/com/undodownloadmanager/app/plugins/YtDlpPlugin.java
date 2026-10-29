@@ -355,13 +355,37 @@ public class YtDlpPlugin extends Plugin {
                             JSObject fObj = new JSObject();
                             fObj.put("format_id", f.getFormatId() != null ? f.getFormatId() : "");
                             fObj.put("ext", f.getExt() != null ? f.getExt() : "mp4");
-                            fObj.put("resolution", f.getResolution() != null ? f.getResolution() : "");
-                            try { fObj.put("filesize", f.getFileSize()); } catch (Throwable ignored) { fObj.put("filesize", 0); }
+
+                            String resolution = "";
+                            try {
+                                if (f.getWidth() > 0 && f.getHeight() > 0) {
+                                    resolution = f.getWidth() + "x" + f.getHeight();
+                                } else if (f.getHeight() > 0) {
+                                    resolution = f.getHeight() + "p";
+                                } else if (f.getFormatNote() != null && !f.getFormatNote().isEmpty()) {
+                                    resolution = f.getFormatNote();
+                                } else if (f.getFormat() != null && !f.getFormat().isEmpty()) {
+                                    resolution = f.getFormat();
+                                }
+                            } catch (Throwable ignored) {}
+                            fObj.put("resolution", resolution);
+
+                            try {
+                                long sz = f.getFileSize();
+                                if (sz <= 0) {
+                                    sz = f.getFileSizeApproximate();
+                                }
+                                fObj.put("filesize", sz > 0 ? sz : 0);
+                            } catch (Throwable ignored) {
+                                fObj.put("filesize", 0);
+                            }
+
                             fObj.put("vcodec", f.getVcodec() != null ? f.getVcodec() : "");
                             fObj.put("acodec", f.getAcodec() != null ? f.getAcodec() : "");
                             fObj.put("url", f.getUrl() != null ? f.getUrl() : "");
                             fObj.put("format_note", f.getFormatNote() != null ? f.getFormatNote() : "");
                             try { fObj.put("fps", f.getFps()); } catch (Throwable ignored) { fObj.put("fps", 0); }
+                            try { fObj.put("tbr", f.getTbr()); } catch (Throwable ignored) {}
                             formatsArray.put(fObj);
                         } catch (Throwable ignored) {}
                     }
