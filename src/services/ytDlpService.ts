@@ -184,22 +184,12 @@ class YtDlpService {
           const progressListener = await plugin.addListener('onProgress', async (event: YtDlpProgressEvent) => {
             if (event.downloadId === id) {
               onProgress(event);
-              if (event.status === 'downloading') {
-                notificationService.notifyProgress(
-                  id,
-                  name,
-                  event.progress,
-                  formatSpeed(event.speed),
-                  event.eta
-                );
-              } else if (event.status === 'completed') {
+              if (event.status === 'completed') {
                 progressListener.remove();
-                await notificationService.notifyCompleted(id, name);
                 await fileManagerService.organizeCompletedFile({ ...item, localPath: event.localPath });
                 resolve({ success: true, localPath: event.localPath });
               } else if (event.status === 'error') {
                 progressListener.remove();
-                notificationService.notifyError(id, name, event.error);
                 reject(new Error(this.formatErrorMessage(event.error || 'خطا در دانلود')));
               }
             }
@@ -252,22 +242,12 @@ class YtDlpService {
           if (event.downloadId === id) {
             onProgress(event);
 
-            if (event.status === 'downloading') {
-              notificationService.notifyProgress(
-                id,
-                name,
-                event.progress,
-                formatSpeed(event.speed),
-                event.eta
-              );
-            } else if (event.status === 'completed') {
+            if (event.status === 'completed') {
               this.cleanupStream(id);
-              await notificationService.notifyCompleted(id, name);
               await fileManagerService.organizeCompletedFile({ ...item, localPath: event.localPath });
               resolve({ success: true, localPath: event.localPath });
             } else if (event.status === 'error') {
               this.cleanupStream(id);
-              notificationService.notifyError(id, name, event.error);
               reject(new Error(this.formatErrorMessage(event.error || 'خطای نامشخص در دانلود')));
             }
           }
@@ -280,7 +260,6 @@ class YtDlpService {
         console.error('SSE Stream error for download:', id, err);
         this.cleanupStream(id);
         const friendlyError = 'ارتباط با موتور دانلود قطع شد یا در دسترس نیست.';
-        notificationService.notifyError(id, name, friendlyError);
         onProgress({
           downloadId: id,
           status: 'error',

@@ -10,7 +10,7 @@ import { AddDownloadModal, AddDownloadOptions } from './components/AddDownloadMo
 import { CoinShopModal } from './components/CoinShopModal';
 import { UndoSnackbar } from './components/UndoSnackbar';
 import { SchedulePanel } from './components/SchedulePanel';
-import { Download, FolderOpen, Clock, ListFilter, WifiOff, AlertTriangle } from 'lucide-react';
+import { Download, FolderOpen, Clock, ListFilter, WifiOff, AlertTriangle, Link2, Plus } from 'lucide-react';
 import { formatBytes } from './utils/formatters';
 import { billingService } from './utils/billing';
 import { ytDlpService } from './services/ytDlpService';
@@ -72,6 +72,8 @@ export default function App() {
   });
 
   const [scheduleNotice, setScheduleNotice] = useState<string | null>(null);
+  const [quickUrl, setQuickUrl] = useState('');
+  const [initialModalUrl, setInitialModalUrl] = useState('');
 
   const refreshBillingState = () => {
     setPurchasedCoins(storageService.getPurchasedCoins());
@@ -476,6 +478,59 @@ export default function App() {
         
         {activeMainTab !== 'schedule' ? (
           <>
+            {/* Quick Link Input Bar for effortless downloads */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-3.5 sm:p-4 shadow-sm flex flex-col sm:flex-row items-center gap-3">
+              <div className="relative flex-1 w-full flex items-center">
+                <Link2 className="absolute right-3.5 w-4 h-4 text-slate-400 pointer-events-none" />
+                <input
+                  type="url"
+                  dir="ltr"
+                  placeholder="لینک ویدیو (اینستاگرام، یوتیوب، آپارات...) یا فایل را بچسبانید..."
+                  value={quickUrl}
+                  onChange={(e) => setQuickUrl(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && quickUrl.trim()) {
+                      setInitialModalUrl(quickUrl.trim());
+                      setIsAddModalOpen(true);
+                      setQuickUrl('');
+                    }
+                  }}
+                  className="w-full pr-10 pl-24 py-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition shadow-inner"
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      if (navigator.clipboard?.readText) {
+                        const text = await navigator.clipboard.readText();
+                        if (text && text.trim().startsWith('http')) {
+                          setQuickUrl(text.trim());
+                        }
+                      }
+                    } catch {}
+                  }}
+                  className="absolute left-2.5 text-[11px] font-medium px-2.5 py-1.5 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl hover:bg-slate-300 dark:hover:bg-slate-600 transition cursor-pointer"
+                >
+                  چسباندن
+                </button>
+              </div>
+              <button
+                onClick={() => {
+                  if (quickUrl.trim()) {
+                    setInitialModalUrl(quickUrl.trim());
+                    setQuickUrl('');
+                  } else {
+                    setInitialModalUrl('');
+                  }
+                  setIsAddModalOpen(true);
+                }}
+                className="w-full sm:w-auto shrink-0 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-semibold px-6 py-3 rounded-2xl shadow-md shadow-blue-500/25 text-xs sm:text-sm cursor-pointer transition"
+              >
+                <Plus className="w-4 h-4" />
+                <span>دانلود سریع</span>
+              </button>
+            </div>
+
             {/* Categories Tabs */}
             <CategoryTabs
               selectedCategory={selectedCategory}
@@ -494,8 +549,8 @@ export default function App() {
               <div className="flex items-center justify-between">
                 <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
                   <FolderOpen className="w-5 h-5 text-blue-600" />
-                  <span>{activeMainTab === 'completed' ? 'فایل‌های دانلود شده' : 'صف دانلود واقعی چنداتصاله (yt-dlp)'}</span>
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                  <span>{activeMainTab === 'completed' ? 'فایل‌های دانلود شده' : 'صف دانلودهای فعال'}</span>
+                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
                     {sortedDownloads.length}
                   </span>
                 </h2>
@@ -511,11 +566,14 @@ export default function App() {
                       {activeMainTab === 'completed' ? 'هیچ فایل دانلود‌شده‌ای وجود ندارد' : 'هیچ دانلودی در صف نیست'}
                     </h3>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      {activeMainTab === 'completed' ? 'پس از اتمام دانلودها، فایل‌ها در این بخش قرار می‌گیرند.' : 'می‌توانید با کلیک روی افزودن لینک، دانلود واقعی ویدیو یا فایل را با چند اتصال همزمان شروع کنید.'}
+                      {activeMainTab === 'completed' ? 'فایل‌های دانلودشده در این بخش ذخیره و مدیریت می‌شوند.' : 'برای شروع، آدرس اینترنتی ویدیو یا فایل را در کادر بالا وارد کرده یا دکمه زیر را لمس کنید.'}
                     </p>
                   </div>
                   <button
-                    onClick={() => setIsAddModalOpen(true)}
+                    onClick={() => {
+                      setInitialModalUrl('');
+                      setIsAddModalOpen(true);
+                    }}
                     className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-medium px-5 py-2.5 rounded-xl shadow-md shadow-blue-600/20 text-xs sm:text-sm transition cursor-pointer"
                   >
                     افزودن لینک دانلود جدید
@@ -556,7 +614,7 @@ export default function App() {
       {/* Footer */}
       <footer className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 py-4 text-center text-xs text-slate-500 dark:text-slate-400 transition-colors duration-200 mb-16">
         <div className="max-w-7xl mx-auto px-4 flex items-center justify-center">
-          <p>آندو دانلودر © 2026 - مجهز به موتور دانلود واقعی yt-dlp</p>
+          <p>آندو دانلودر © 2026 - مدیر دانلود هوشمند، پرسرعت و چنداتصاله</p>
         </div>
       </footer>
 
@@ -607,7 +665,11 @@ export default function App() {
       {/* Add Download Modal */}
       <AddDownloadModal
         isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
+        initialUrl={initialModalUrl}
+        onClose={() => {
+          setIsAddModalOpen(false);
+          setInitialModalUrl('');
+        }}
         onAddDownload={handleAddDownload}
       />
 

@@ -133,56 +133,11 @@ public class YtDlpPlugin extends Plugin {
     }
 
     private void createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            CharSequence name = "دانلودهای Undo Download Manager";
-            String description = "نمایش زنده پیشرفت و سرعت دانلود فایل‌ها در نوار اعلان";
-            int importance = NotificationManager.IMPORTANCE_LOW;
-            NotificationChannel channel = new NotificationChannel(CHANNEL_ID, name, importance);
-            channel.setDescription(description);
-            if (notificationManager != null) {
-                notificationManager.createNotificationChannel(channel);
-            }
-        }
+        // Disabled: user requested zero notifications
     }
 
     private void updateNotification(int notifId, String title, int progress, String speed, boolean isDone) {
-        if (notificationManager == null) return;
-        try {
-            Context context = getContext();
-            if (context == null) return;
-
-            NotificationCompat.Builder builder = new NotificationCompat.Builder(context, CHANNEL_ID)
-                    .setSmallIcon(android.R.drawable.stat_sys_download)
-                    .setContentTitle(title)
-                    .setOngoing(!isDone)
-                    .setAutoCancel(isDone)
-                    .setPriority(NotificationCompat.PRIORITY_LOW);
-
-            if (isDone) {
-                builder.setContentText("دانلود با موفقیت پایان یافت")
-                        .setProgress(0, 0, false)
-                        .setSmallIcon(android.R.drawable.stat_sys_download_done);
-            } else {
-                String contentText = (progress > 0 ? progress + "%" : "در حال دریافت...") +
-                        (speed != null && !speed.isEmpty() ? " • " + speed : "");
-                builder.setContentText(contentText)
-                        .setProgress(100, Math.max(0, Math.min(100, progress)), progress <= 0);
-            }
-
-            notificationManager.notify(notifId, builder.build());
-            if (isDone) {
-                executor.execute(() -> {
-                    try {
-                        Thread.sleep(4000);
-                        if (notificationManager != null) {
-                            notificationManager.cancel(notifId);
-                        }
-                    } catch (Exception ignored) {}
-                });
-            }
-        } catch (Exception e) {
-            Log.d(TAG, "Notification skipped: " + e.getMessage());
-        }
+        // Disabled: user requested zero notifications
     }
 
     private boolean isDirectMediaUrl(String url) {
@@ -1025,5 +980,170 @@ public class YtDlpPlugin extends Plugin {
         JSObject ret = new JSObject();
         ret.put("success", true);
         call.resolve(ret);
+    }
+
+    /**
+     * Resolves the target file on disk from localPath or filename.
+     */
+    private File findDownloadedFileOnDisk(String path, String fileName, Context context) {
+        if (path != null && !path.trim().isEmpty()) {
+            File directFile = new File(path);
+            if (directFile.exists()) {
+                return directFile;
+            }
+        }
+
+        // Try standard UndoDownloads public directory
+        File pubDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+        File undoDir = new File(pubDownloads, "UndoDownloads");
+
+        if (fileName != null && !fileName.trim().isEmpty()) {
+            File pubFile = new File(undoDir, fileName);
+            if (pubFile.exists()) return pubFile;
+            File rootPubFile = new File(pubDownloads, fileName);
+            if (rootPubFile.exists()) return rootPubFile;
+        }
+
+        if (path != null && !path.trim().isEmpty()) {
+            String baseName = new File(path).getName();
+            File pubFile = new File(undoDir, baseName);
+            if (pubFile.exists()) return pubFile;
+        }
+
+        // Try app-specific download directory
+        if (context != null) {
+            File workDir = new File(context.getExternalFilesDir(null), "downloads");
+            if (fileName != null && !fileName.trim().isEmpty()) {
+                File localWork = new File(workDir, fileName);
+                if (localWork.exists()) return localWork;
+            }
+            if (path != null && !path.trim().isEmpty()) {
+                File localWork = new File(workDir, new File(path).getName());
+                if (localWork.exists()) return localWork;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Opens a completed downloaded file with the Android App Chooser ("Open with...")
+     */
+    @PluginMethod
+    public void openFile(PluginCall call) {
+        String path = call.getString("path");
+        if (path == null || path.isEmpty()) {
+            path = call.getString("localPath");
+        }
+        String fileName = call.getString("name");
+
+        try {
+            Context context = getContext();
+            if (context == null) {
+                call.reject("خطا: کانتکست سیستم‌عامل در دسترس نیست.");
+                return;
+            }
+
+            File targetFile = findDownloadedFileOnDisk(path, fileName, context);
+            if (targetFile == null || !targetFile.exists()) {
+                call.reject("فایل در حافظه دستگاه یافت نشد. ممکن است جابه‌جا یا حذف شده باشد.");
+                return;
+            }
+
+            String mimeType = call.getString("mimeType");
+            if (mimeType == null || mimeType.trim().isEmpty() || "*/*".equals(mimeType)) {
+                mimeType = getMimeType(targetFile.getName());
+            }
+
+            Uri contentUri;
+            try {
+                contentUri = androidx.core.content.FileProvider.getUriForFile(
+                        context,
+                        context.getPackageName() + ".fileprovider",
+                        targetFile
+                );
+            } catch (Exception ex) {
+                Log.w(TAG, "FileProvider failed, fallback to Uri.fromFile: " + ex.getMessage());
+                contentUri = Uri.fromFile(targetFile);
+            }
+
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setDataAndType(contentUri, mimeType);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+            Intent chooser = Intent.createChooser(intent, "انتخاب برنامه برای باز کردن فایل");
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+            context.startActivity(chooser);
+
+            JSObject ret = new JSObject();
+            ret.put("success", true);
+            ret.put("path", targetFile.getAbsolutePath());
+            call.resolve(ret);
+        } catch (android.content.ActivityNotFoundException anfe) {
+            call.reject("هیچ برنامه‌ای برای باز کردن این نوع فایل روی گوشی یافت نشد.");
+        } catch (Exception e) {
+            Log.e(TAG, "openFile error: " + e.getMessage(), e);
+            call.reject("خطا در باز کردن فایل: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Shares a downloaded file using Android Native Intent Chooser.
+     */
+    @PluginMethod
+    public void shareFile(PluginCall call) {
+        String path = call.getString("path");
+        if (path == null || path.isEmpty()) {
+            path = call.getString("localPath");
+        }
+        String fileName = call.getString("name");
+
+        try {
+            Context context = getContext();
+            if (context == null) {
+                call.reject("خطا: کانتکست سیستم‌عامل در دسترس نیست.");
+                return;
+            }
+
+            File targetFile = findDownloadedFileOnDisk(path, fileName, context);
+            if (targetFile == null || !targetFile.exists()) {
+                call.reject("فایل جهت اشتراک‌گذاری در دستگاه یافت نشد.");
+                return;
+            }
+
+            String mimeType = getMimeType(targetFile.getName());
+            Uri contentUri;
+            try {
+                contentUri = androidx.core.content.FileProvider.getUriForFile(
+                        context,
+                        context.getPackageName() + ".fileprovider",
+                        targetFile
+                );
+            } catch (Exception ex) {
+                contentUri = Uri.fromFile(targetFile);
+            }
+
+            Intent shareIntent = new Intent(Intent.ACTION_SEND);
+            shareIntent.setType(mimeType);
+            shareIntent.putExtra(Intent.EXTRA_STREAM, contentUri);
+            shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            shareIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+            Intent chooser = Intent.createChooser(shareIntent, "اشتراک‌گذاری فایل با...");
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+            context.startActivity(chooser);
+
+            JSObject ret = new JSObject();
+            ret.put("success", true);
+            call.resolve(ret);
+        } catch (Exception e) {
+            Log.e(TAG, "shareFile error: " + e.getMessage(), e);
+            call.reject("خطا در اشتراک‌گذاری: " + e.getMessage());
+        }
     }
 }

@@ -119,7 +119,12 @@ export const DownloadCard: React.FC<DownloadCardProps> = ({
   };
 
   const handleOpenFile = async () => {
-    await fileManagerService.openFile(item);
+    try {
+      await fileManagerService.openFile(item);
+    } catch (err: any) {
+      setShareMessage(err?.message || 'خطا در باز کردن فایل');
+      setTimeout(() => setShareMessage(null), 3500);
+    }
   };
 
   const handleShareFile = async () => {

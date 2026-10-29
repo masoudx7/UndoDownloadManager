@@ -71,36 +71,62 @@ class FileManagerService {
   }
 
   /**
-   * Open or play the downloaded file
+   * Open or play the downloaded file with Android App Chooser ("Open with...")
    */
   public async openFile(item: DownloadItem): Promise<void> {
-    const fileUrl = this.getDownloadUrl(item);
-
     if (this.isNative) {
-      // In native environment, trigger browser or download intent
-      window.open(fileUrl, '_system');
-    } else {
-      // In web browser, trigger download or open preview in new tab
-      const anchor = document.createElement('a');
-      anchor.href = fileUrl;
-      anchor.download = item.name;
-      anchor.target = '_blank';
-      document.body.appendChild(anchor);
-      anchor.click();
-      document.body.removeChild(anchor);
+      const win = window as any;
+      const plugin = win.Capacitor?.Plugins?.YtDlp;
+      if (plugin?.openFile) {
+        try {
+          await plugin.openFile({
+            localPath: item.localPath || '',
+            path: item.localPath || '',
+            name: item.name,
+          });
+          return;
+        } catch (err: any) {
+          console.warn('Native openFile failed:', err);
+          throw new Error(err?.message || 'خطا در باز کردن فایل در دستگاه');
+        }
+      }
     }
+
+    // In web browser preview environment, trigger direct download
+    const fileUrl = this.getDownloadUrl(item);
+    const anchor = document.createElement('a');
+    anchor.href = fileUrl;
+    anchor.download = item.name;
+    anchor.target = '_blank';
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
   }
 
   /**
    * Share the downloaded file with other apps (Telegram, WhatsApp, Drive, etc.)
    */
   public async shareFile(item: DownloadItem): Promise<{ success: boolean; message?: string }> {
-    const fileUrl = this.getDownloadUrl(item);
-
     try {
       if (this.isNative) {
+        const win = window as any;
+        const plugin = win.Capacitor?.Plugins?.YtDlp;
+        if (plugin?.shareFile) {
+          try {
+            await plugin.shareFile({
+              localPath: item.localPath || '',
+              path: item.localPath || '',
+              name: item.name,
+            });
+            return { success: true };
+          } catch (pluginErr) {
+            console.warn('Native YtDlp shareFile failed, fallback to Share plugin:', pluginErr);
+          }
+        }
+
         const canShare = await Share.canShare().catch(() => ({ value: true }));
         if (canShare.value) {
+          const fileUrl = this.getDownloadUrl(item);
           await Share.share({
             title: item.name,
             text: `دانلود شده با Undo Download Manager: ${item.name}`,
@@ -111,6 +137,7 @@ class FileManagerService {
         }
       }
 
+      const fileUrl = this.getDownloadUrl(item);
       // Web Share API fallback
       if (typeof navigator !== 'undefined' && navigator.share) {
         await navigator.share({
@@ -129,7 +156,6 @@ class FileManagerService {
 
       return { success: false, message: 'قابلیت اشتراک‌گذاری در این مرورگر پشتیبانی نمی‌شود.' };
     } catch (err: any) {
-      // User cancelled share dialog is not an error
       if (err.name === 'AbortError') {
         return { success: true };
       }
