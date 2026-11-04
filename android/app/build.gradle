@@ -74,9 +74,17 @@ android {
             def ksFile = file(keystorePath)
             if (ksFile.exists()) {
                 storeFile ksFile
-                storePassword (storePass != null && !storePass.isEmpty() ? storePass : "undodownload123")
-                keyAlias (keyAli != null && !keyAli.isEmpty() ? keyAli : "undodownload-alias")
-                keyPassword (keyPass != null && !keyPass.isEmpty() ? keyPass : "undodownload123")
+                if (storePass && keyAli && keyPass) {
+                    // مقادیر از GitHub Secrets می‌آیند
+                    storePassword storePass
+                    keyAlias keyAli
+                    keyPassword keyPass
+                } else {
+                    // بیلد لوکال بدون secrets
+                    storePassword "undodownload123"
+                    keyAlias "{release}"
+                    keyPassword "undodownload123"
+                }
             }
         }
     }
