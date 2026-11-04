@@ -219,7 +219,7 @@ export const DownloadCard: React.FC<DownloadCardProps> = ({
                 ? 'bg-rose-500'
                 : item.status === 'paused'
                 ? 'bg-amber-500'
-                : 'bg-blue-600'
+                : 'bg-indigo-600'
             }`}
             style={{ width: `${item.progress}%` }}
           ></div>
@@ -243,7 +243,7 @@ export const DownloadCard: React.FC<DownloadCardProps> = ({
             <>
               <button
                 onClick={handleOpenFile}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 transition cursor-pointer font-medium"
+                className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-indigo-200 dark:border-indigo-900/50 bg-indigo-50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 transition cursor-pointer font-medium"
               >
                 <ExternalLink className="w-3 h-3" />
                 <span>پخش / باز کردن</span>
@@ -251,7 +251,7 @@ export const DownloadCard: React.FC<DownloadCardProps> = ({
 
               <button
                 onClick={handleShareFile}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-indigo-200 dark:border-indigo-900/50 bg-indigo-50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 transition cursor-pointer font-medium"
+                className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-cyan-200 dark:border-cyan-900/50 bg-cyan-50 dark:bg-cyan-950/30 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-100 transition cursor-pointer font-medium"
                 title="اشتراک‌گذاری فایل"
               >
                 <Share2 className="w-3 h-3" />
@@ -263,7 +263,7 @@ export const DownloadCard: React.FC<DownloadCardProps> = ({
           {(item.status === 'paused' || item.status === 'queued') && (
             <button
               onClick={() => onPauseResume(item.id)}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-blue-200 dark:border-blue-900/50 bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 hover:bg-blue-100 transition cursor-pointer font-medium"
+              className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-indigo-200 dark:border-indigo-900/50 bg-indigo-50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 transition cursor-pointer font-medium"
             >
               <Play className="w-3 h-3" />
               <span>{item.status === 'queued' ? 'شروع نوبت فوری' : 'ادامه دانلود'}</span>
@@ -273,7 +273,7 @@ export const DownloadCard: React.FC<DownloadCardProps> = ({
           {item.status === 'error' && (
             <button
               onClick={() => onRetry(item.id)}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-blue-200 dark:border-blue-900/50 bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 hover:bg-blue-100 transition cursor-pointer font-medium"
+              className="flex items-center gap-1 px-3 py-1.5 rounded-xl border border-indigo-200 dark:border-indigo-900/50 bg-indigo-50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 transition cursor-pointer font-medium"
             >
               <RotateCcw className="w-3 h-3" />
               <span>تلاش مجدد</span>
