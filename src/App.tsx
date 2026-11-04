@@ -3,7 +3,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { DownloadItem, DownloadCategory, DownloadStatus, ScheduleSettings, UndoNotification } from './types';
 import { initialDownloads } from './data/initialDownloads';
 import { Header } from './components/Header';
-import { CategoryTabs } from './components/CategoryTabs';
 import { SearchBar } from './components/SearchBar';
 import { DownloadCard } from './components/DownloadCard';
 import { AddDownloadModal, AddDownloadOptions } from './components/AddDownloadModal';
@@ -157,7 +156,6 @@ export default function App() {
   }, []);
 
   const [activeMainTab, setActiveMainTab] = useState<'active' | 'completed' | 'schedule'>('active');
-  const [selectedCategory, setSelectedCategory] = useState<DownloadCategory>('all');
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
   const [isCoinShopOpen, setIsCoinShopOpen] = useState<boolean>(false);
   const [undoNotification, setUndoNotification] = useState<UndoNotification | null>(null);
@@ -408,17 +406,6 @@ export default function App() {
     setDownloads((prev) => prev.filter((d) => d.status !== 'completed'));
   };
 
-  // Category counts
-  const counts: Record<DownloadCategory, number> = {
-    all: downloads.length,
-    video: downloads.filter((d) => d.category === 'video').length,
-    music: downloads.filter((d) => d.category === 'music').length,
-    document: downloads.filter((d) => d.category === 'document').length,
-    software: downloads.filter((d) => d.category === 'software').length,
-    archive: downloads.filter((d) => d.category === 'archive').length,
-    other: downloads.filter((d) => d.category === 'other').length,
-  };
-
   const activeCount = downloads.filter((d) => d.status === 'downloading').length;
   const completedCount = downloads.filter((d) => d.status === 'completed').length;
   const totalStorageUsedBytes = downloads
@@ -428,9 +415,7 @@ export default function App() {
   // Filter & Sort
   const filteredDownloads = downloads.filter((item) => {
     const isCompletedTab = activeMainTab === 'completed';
-    const matchesTabStatus = isCompletedTab ? item.status === 'completed' : item.status !== 'completed';
-    const matchesCategory = selectedCategory === 'all' || item.category === selectedCategory;
-    return matchesTabStatus && matchesCategory;
+    return isCompletedTab ? item.status === 'completed' : item.status !== 'completed';
   });
 
   const sortedDownloads = [...filteredDownloads].sort((a, b) => b.id.localeCompare(a.id));
@@ -530,13 +515,6 @@ export default function App() {
                 <span>دانلود سریع</span>
               </button>
             </div>
-
-            {/* Categories Tabs */}
-            <CategoryTabs
-              selectedCategory={selectedCategory}
-              onSelectCategory={setSelectedCategory}
-              counts={counts}
-            />
 
             {/* Clear Completed Bar if completed tab */}
             <SearchBar

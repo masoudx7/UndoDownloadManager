@@ -54,19 +54,9 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 sticky top-0 z-30 transition-colors duration-200">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         
-        {/* Logo & Title */}
+        {/* Logo */}
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-md shadow-blue-500/20">
-            <Download className="w-5 h-5" />
-          </div>
-          <div>
-            <h1 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white leading-tight">
-              آندو دانلودر
-            </h1>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              مدیر دانلود هوشمند
-            </p>
-          </div>
+          <img src="/icon.png" alt="Logo" className="w-10 h-10 rounded-xl shadow-sm" />
         </div>
 
         {/* Minimal stats */}
