@@ -31,7 +31,7 @@ export const STORAGE_KEYS = {
   QUOTA_SYNCED_AT: 'undo_downloader_quota_synced_at_v1',
 };
 
-const DEFAULT_FREE_DOWNLOADS = 5;
+const DEFAULT_FREE_DOWNLOADS = 10;
 
 export interface StorageSnapshot {
   downloads: DownloadItem[];

@@ -126,17 +126,18 @@ class YtDlpService {
           if (res && res.mediaInfo) {
             return res.mediaInfo;
           }
+          throw new Error('اطلاعات رسانه دریافت نشد.');
         } catch (nativeErr: any) {
           const msg = nativeErr?.message || '';
           console.warn('Native on-device extraction failed:', msg);
           throw new Error(this.formatErrorMessage(msg || 'استخراج اطلاعات ویدیو در دستگاه با خطا مواجه شد'));
         }
       } else {
-        throw new Error('موتور دانلود بومی روی دستگاه راه‌اندازی نشده است.');
+        throw new Error('موتور دانلود بومی روی دستگاه راه‌اندازی نشده است. لطفاً از صحت نصب برنامه اطمینان حاصل کنید.');
       }
     }
 
-    // 2. Web Preview / Dev Environment fallback
+    // 2. Web Preview / Dev Environment fallback (Only used in non-native mode)
     try {
       const response = await fetch('/api/ytdlp/extract', {
         method: 'POST',
@@ -209,13 +210,13 @@ class YtDlpService {
 
           return;
         } else {
-          const msg = 'پلاگین بومی روی این دستگاه در دسترس نیست. لطفاً فایل نصبی به‌روز APK را نصب کنید.';
+          const msg = 'پلاگین بومی روی این دستگاه در دسترس نیست. موتور دانلود محلی یافت نشد.';
           reject(new Error(msg));
           return;
         }
       }
 
-      // 2. Web / Preview Path: Server-Sent Events (SSE) Stream
+      // 2. Web / Preview Path: Server-Sent Events (SSE) Stream (Only used in non-native mode)
       const queryParams = new URLSearchParams({
         id,
         url,
@@ -289,6 +290,7 @@ class YtDlpService {
           return false;
         }
       }
+      return false; // On native, if plugin missing, we can't pause
     }
 
     try {
@@ -321,6 +323,7 @@ class YtDlpService {
           return false;
         }
       }
+      return false; // On native, if plugin missing, we can't cancel
     }
 
     try {

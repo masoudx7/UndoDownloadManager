@@ -25,6 +25,7 @@ import com.yausername.youtubedl_android.YoutubeDL;
 import com.yausername.youtubedl_android.YoutubeDLException;
 import com.yausername.youtubedl_android.YoutubeDLRequest;
 import com.yausername.youtubedl_android.YoutubeDLResponse;
+import com.yausername.youtubedl_android.DownloadProgressCallback;
 import com.yausername.youtubedl_android.mapper.VideoFormat;
 import com.yausername.youtubedl_android.mapper.VideoInfo;
 import com.yausername.ffmpeg.FFmpeg;
@@ -35,8 +36,6 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.RandomAccessFile;
-import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.List;
@@ -76,10 +75,6 @@ public class YtDlpPlugin extends Plugin {
     private volatile boolean isEngineInitialized = false;
     private volatile boolean isInitializing = false;
 
-    @FunctionalInterface
-    private interface ProgressConsumer {
-        void accept(float progress, long etaInSeconds, String line);
-    }
 
     @Override
     public void load() {
@@ -428,7 +423,7 @@ public class YtDlpPlugin extends Plugin {
                 emitProgress(id, "downloading", 0, 0, 0, 0, "۰ بایت/ثانیه", "در حال شروع دانلود...", null, null);
                 updateNotification(notifId, displayName, 0, "در حال اتصال...", false);
 
-                executeYoutubeDLWithProgress(request, id, (progress, etaInSeconds, line) -> {
+                YoutubeDL.getInstance().execute(request, id, (progress, etaInSeconds, line) -> {
                     long etaSec = etaInSeconds > 0 ? etaInSeconds : 0;
                     String etaStr = etaSec > 0 ? (etaSec + " ثانیه") : "محاسبه...";
                     long speedBytes = parseSpeedBytesPerSec(line);
@@ -476,83 +471,11 @@ public class YtDlpPlugin extends Plugin {
         });
     }
 
-    /**
-     * Resiliently executes YoutubeDL with progress callback using reflection and dynamic proxy.
-     */
-    private YoutubeDLResponse executeYoutubeDLWithProgress(YoutubeDLRequest request, String processId, ProgressConsumer consumer) throws Exception {
-        Method[] methods = YoutubeDL.class.getMethods();
-
-        for (Method m : methods) {
-            if ("execute".equals(m.getName())) {
-                Class<?>[] params = m.getParameterTypes();
-
-                // Signature: execute(YoutubeDLRequest, String processId, Callback/Function)
-                if (params.length == 3 && params[0].equals(YoutubeDLRequest.class) && params[1].equals(String.class)) {
-                    Object callbackProxy = createProgressProxy(params[2], consumer);
-                    return (YoutubeDLResponse) m.invoke(YoutubeDL.getInstance(), request, processId, callbackProxy);
-                }
-
-                // Signature: execute(YoutubeDLRequest, Callback/Function, String processId)
-                if (params.length == 3 && params[0].equals(YoutubeDLRequest.class) && params[2].equals(String.class)) {
-                    Object callbackProxy = createProgressProxy(params[1], consumer);
-                    return (YoutubeDLResponse) m.invoke(YoutubeDL.getInstance(), request, callbackProxy, processId);
-                }
-
-                // Signature: execute(YoutubeDLRequest, Callback/Function)
-                if (params.length == 2 && params[0].equals(YoutubeDLRequest.class)) {
-                    Object callbackProxy = createProgressProxy(params[1], consumer);
-                    return (YoutubeDLResponse) m.invoke(YoutubeDL.getInstance(), request, callbackProxy);
-                }
-            }
-        }
-
-        // Direct fallback: execute(request)
-        return YoutubeDL.getInstance().execute(request);
-    }
-
-    /**
-     * Creates a dynamic proxy for the progress callback parameter.
-     */
-    private Object createProgressProxy(Class<?> callbackType, ProgressConsumer consumer) {
-        if (!callbackType.isInterface()) {
-            return null;
-        }
-
-        return Proxy.newProxyInstance(
-                callbackType.getClassLoader(),
-                new Class<?>[]{callbackType},
-                (proxy, method, args) -> {
-                    if (args != null && args.length >= 2) {
-                        try {
-                            float prog = ((Number) args[0]).floatValue();
-                            long eta = ((Number) args[1]).longValue();
-                            String line = args.length > 2 && args[2] != null ? args[2].toString() : "";
-                            consumer.accept(prog, eta, line);
-                        } catch (Exception ignored) {}
-                    }
-
-                    if (method.getReturnType().equals(void.class)) {
-                        return null;
-                    }
-
-                    try {
-                        Class<?> unitClass = Class.forName("kotlin.Unit");
-                        return unitClass.getField("INSTANCE").get(null);
-                    } catch (Exception ignored) {
-                        return null;
-                    }
-                }
-        );
-    }
-
     private void destroyProcessSafely(String processId) {
         try {
             YoutubeDL.getInstance().destroyProcessById(processId);
         } catch (Throwable t) {
-            try {
-                Method m = YoutubeDL.class.getMethod("destroyProcessById", String.class);
-                m.invoke(YoutubeDL.getInstance(), processId);
-            } catch (Throwable ignored) {}
+            Log.e(TAG, "Failed to destroy process: " + processId, t);
         }
     }
 

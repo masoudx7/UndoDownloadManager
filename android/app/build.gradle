@@ -66,37 +66,45 @@ android {
 
     signingConfigs {
         release {
-            def keystorePath = System.getenv("KEYSTORE_PATH") ?: "undodownloadmanager-release-key.jks"
+            def keystorePath = System.getenv("KEYSTORE_PATH")
             def storePass = System.getenv("KEYSTORE_PASSWORD")
             def keyAli = System.getenv("KEY_ALIAS")
             def keyPass = System.getenv("KEY_PASSWORD")
 
-            def ksFile = file(keystorePath)
-            if (ksFile.exists()) {
-                storeFile ksFile
-                if (storePass && keyAli && keyPass) {
-                    // مقادیر از GitHub Secrets می‌آیند
+            // Strict check: Only configure release signing if ALL credentials are provided via ENV
+            if (keystorePath && storePass && keyAli && keyPass) {
+                def ksFile = file(keystorePath)
+                if (ksFile.exists()) {
+                    storeFile ksFile
                     storePassword storePass
                     keyAlias keyAli
                     keyPassword keyPass
+                    project.logger.lifecycle("✅ Release signing configured via environment variables.")
                 } else {
-                    // بیلد لوکال بدون secrets
-                    storePassword "undodownload123"
-                    keyAlias "{release}"
-                    keyPassword "undodownload123"
+                    project.logger.warn("⚠️ KEYSTORE_PATH provided but file does not exist: ${keystorePath}")
                 }
+            } else {
+                project.logger.lifecycle("ℹ️ Release signing credentials missing in environment. Build will fail if 'assembleRelease' or 'bundleRelease' is called.")
             }
         }
     }
 
     buildTypes {
         release {
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            def ksFile = file(System.getenv("KEYSTORE_PATH") ?: "undodownloadmanager-release-key.jks")
-            if (ksFile.exists()) {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            
+            // Apply release signing only if credentials were successfully loaded
+            if (signingConfigs.release.storeFile != null) {
                 signingConfig signingConfigs.release
             } else {
+                // Fail release builds early if signing is requested but not configured
+                gradle.taskGraph.whenReady { taskGraph ->
+                    if (taskGraph.hasTask(":app:assembleRelease") || taskGraph.hasTask(":app:bundleRelease")) {
+                        throw new GradleException("🚨 PRODUCTION BUILD FAILED: Release signing credentials (KEYSTORE_PATH, etc.) are missing or invalid.")
+                    }
+                }
                 signingConfig signingConfigs.debug
             }
         }

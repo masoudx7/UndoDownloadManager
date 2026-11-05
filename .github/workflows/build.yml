@@ -46,37 +46,40 @@ jobs:
       - name: Sync Capacitor Android
         run: bunx cap sync android
 
-      # 8. Setup Keystore (Secret or Auto-generate for CI release signing)
+      # 8. Setup Keystore from Secret (Required for production release)
       - name: Setup Release Keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
           if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > android/app/undodownloadmanager-release-key.jks
-            echo "✅ Release Keystore decoded from secret successfully."
-          elif [ ! -f "android/app/undodownloadmanager-release-key.jks" ]; then
-            echo "⚡ Generating release keystore for CI build..."
-            keytool -genkeypair -v -keystore android/app/undodownloadmanager-release-key.jks \
-              -alias undodownload-alias \
-              -keyalg RSA -keysize 2048 -validity 10000 \
-              -storepass undodownload123 -keypass undodownload123 \
-              -dname "CN=UndoDownloadManager, OU=Mobile, O=UndoDownloadManager, L=Tehran, ST=Tehran, C=IR"
-            echo "✅ Release keystore generated successfully."
+            echo "$KEYSTORE_BASE64" | base64 -d > android/app/release-key.jks
+            echo "✅ Release Keystore decoded successfully."
+          else
+            echo "⚠️ KEYSTORE_BASE64 secret is missing. Release build will be skipped or will fail."
           fi
 
-      # 9. Build Android APKs (Debug & Release)
+      # 9. Build Android APKs
       - name: Build Android APKs
         env:
+          KEYSTORE_PATH: "release-key.jks"
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           cd android
           chmod +x gradlew
+          
           echo "🔨 Building Debug APK..."
-          ./gradlew assembleDebug --stacktrace
-          echo "🔨 Building Release APK..."
-          ./gradlew assembleRelease --stacktrace
+          ./gradlew :app:assembleDebug --stacktrace
+          
+          # Only attempt release build if keystore secret was provided
+          if [ -f "app/release-key.jks" ]; then
+            echo "🔨 Building Production Release APK..."
+            ./gradlew :app:assembleRelease --stacktrace
+          else
+            echo "⏩ Skipping Production Release APK (Keystore missing)."
+          fi
+          
           echo "🔍 Generated APKs:"
           find . -name "*.apk" -type f
 

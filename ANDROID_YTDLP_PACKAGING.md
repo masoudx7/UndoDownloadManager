@@ -1,81 +1,54 @@
-# راهنمای بسته‌بندی و اجرای موتور yt-dlp در اندروید با Capacitor
-## (Android yt-dlp Packaging & Native Bridge Architecture)
+# راهنمای فنی پیاده‌سازی موتور دانلود بومی اندروید
+## (Native youtubedl-android Integration Guide)
 
-این سند نحوه اجرای کاملاً بومی (Native) موتور قدرتمند **yt-dlp** بر روی دستگاه‌های اندرویدی در پروژه Capacitor را تشریح می‌کند.
-
----
-
-### ۱. معماری کلی سیستم دانلود
-
-سیستم دانلود از دو لایه هماهنگ تشکیل شده است:
-
-1. **لایه وب / توسعه (Web & Dev Fallback):**
-   - اتصال از طریق `EventSource` (Server-Sent Events) به اندپوینت `/api/ytdlp/stream`.
-   - اجرای فرآیند واقعی `yt-dlp` با سوییچ `--progress-template` برای استخراج بایت‌ها، سرعت لحظه‌ای و زمان تخمینی (ETA).
-   - امکان دانلود مستقیم انواع فایل‌ها با متد Chunked Streaming و پشتیبانی از هدر Range برای توقف/ادامه (Pause/Resume).
-
-2. **لایه نیتیو اندروید (Capacitor Native Bridge):**
-   - پلاگین بومی `YtDlpPlugin.java` ثبت‌شده در `MainActivity.java`.
-   - دریافت رویدادهای پیشرفت در فرانت‌اند React با `plugin.addListener('onProgress', ...)`.
-   - ذخیره‌سازی خودکار در پوشه عمومی دانلودهای گوشی (`/storage/emulated/0/Download`) با استفاده از `DownloadManager` و `@capacitor/filesystem`.
-   - سرویس پیش‌زمینه (Foreground Service) و اعلان‌های نوار وضعیت گوشی (Notification Progress Bar) برای دانلود در پس‌زمینه بدون بسته‌شدن توسط سیستم‌عامل.
+این سند جزئیات فنی نحوه تعامل لایه React با لایه بومی اندروید برای اجرای دستورات `yt-dlp` و مدیریت دانلودها را تشریح می‌کند.
 
 ---
 
-### ۲. نحوه قرار دادن باینری yt-dlp درون APK اندروید
+### ۱. معماری پلاگین بومی (Capacitor Native Plugin)
 
-برای اینکه برنامه بدون نیاز به هیچ سرور خارجی، مستقیماً روی گوشی فایل اجرایی yt-dlp را صدا بزند، دو روش استاندارد در اندروید وجود دارد:
+هسته اصلی دانلود در اندروید، کلاس `YtDlpPlugin.java` است. این پلاگین از کتابخانه **youtubedl-android** استفاده می‌کند که خود شامل موارد زیر است:
+- **باینری پایتون (Bionic libc):** نسخه بهینه شده پایتون برای اجرا در NDK اندروید.
+- **YtDlp JNI Wrapper:** برای فراخوانی دستورات پایتونی از درون کدهای جاوا.
+- **FFmpeg-Android:** باینری‌های کامپایل شده برای ادغام صدا و تصویر.
 
-#### روش اول: باینری کامپایل‌شده مستقل (Stand-alone ELF / Python Executable)
-1. باینری مستقل پایتون یا نسخه کامپایل‌شده yt-dlp برای معماری‌های ARM (`arm64-v8a` و `armeabi-v7a`) را دانلود کنید:
-   ```bash
-   # مسیر قرارگیری باینری در پروژه اندروید:
-   android/app/src/main/assets/bin/yt-dlp
-   android/app/src/main/assets/bin/ffmpeg
-   ```
-2. در زمان اجرای اولیه برنامه، پلاگین جاوا فایل باینری را از پوشه `assets` به مسیر محلی اجرایی برنامه کپی می‌کند:
-   ```java
-   File internalBin = new File(context.getFilesDir(), "yt-dlp");
-   // کپی از AssetManager و اعطای مجوز اجرا
-   internalBin.setExecutable(true, false);
-   ```
-3. سپس با `ProcessBuilder` یا `Runtime.getRuntime().exec(...)` دستور دانلود مستقیماً اجرا می‌شود.
-
-#### روش دوم: استفاده از Chaquopy (کامپایلر رسمی پایتون برای اندروید)
-در فایل `android/app/build.gradle`:
-```gradle
-plugins {
-    id 'com.android.application'
-    id 'com.chaquo.python'
-}
-
-android {
-    defaultConfig {
-        ndk {
-            abiFilters "arm64-v8a", "armeabi-v7a", "x86_64"
-        }
-        python {
-            pip {
-                install "yt-dlp"
-            }
-        }
-    }
-}
-```
-سپس در کد جاوا مستقیماً ماژول فراخوانی می‌شود:
-```java
-Python py = Python.getInstance();
-PyObject ytDlpModule = py.getModule("yt_dlp");
-PyObject ydl = ytDlpModule.callAttr("YoutubeDL", optionsMap);
-ydl.callAttr("download", new Object[]{ videoUrl });
-```
+#### مسیرهای کلیدی:
+- **پلاگین جاوا:** `android/app/src/main/java/com/undodownloadmanager/app/plugins/YtDlpPlugin.java`
+- **وابستگی‌ها:** در فایل `android/app/build.gradle` تحت عنوان `io.github.junkfood02:youtubedl-android`.
 
 ---
 
-### ۳. مجوزهای اندروید (Android Permissions)
-مجوزهای لازم در `android/app/src/main/AndroidManifest.xml` اضافه شده‌اند:
-- `android.permission.INTERNET`: دسترسی کامل به اینترنت
-- `android.permission.FOREGROUND_SERVICE`: اجرای فرآیند دانلود در پس‌زمینه
-- `android.permission.FOREGROUND_SERVICE_DATA_SYNC`: سینک و دانلود دیتا طبق استانداردهای اندروید ۱۴+
-- `android.permission.POST_NOTIFICATIONS`: نمایش پروگرس بار در نوار اعلان گوشی
-- `android.permission.WRITE_EXTERNAL_STORAGE`: ذخیره در گالری و پوشه دانلودهای عمومی
+### ۲. چرخه حیات استخراج و دانلود (Extraction & Download Lifecycle)
+
+#### گام ۱: استخراج اطلاعات (Extract Info)
+هنگامی که کاربر لینکی را وارد می‌کند، متد `extractInfo` در پلاگین فراخوانی می‌شود. این متد خروجی JSON از موتور دریافت کرده و فیلدهای زیر را به React برمی‌گرداند:
+- عنوان ویدیو (Title)
+- تصویر بندانگشتی (Thumbnail)
+- لیست فرمت‌ها و کیفیت‌های موجود (Formats)
+
+#### گام ۲: شروع دانلود (Start Download)
+با انتخاب کیفیت، متد `startDownload` فراخوانی می‌شود. این متد یک فرآیند جداگانه (Process) در اندروید ایجاد کرده و پیشرفت لحظه‌ای را از طریق `addListener('onProgress', ...)` به رابط کاربری گزارش می‌دهد.
+
+#### گام ۳: مدیریت فایل‌های موقت (Work Directory)
+- فایل‌ها ابتدا در پوشه امن داخلی برنامه (`context.getFilesDir()`) دانلود می‌شوند.
+- پس از اتمام موفقیت‌آمیز و در صورت نیاز به Muxing (ترکیب صدا و تصویر)، FFmpeg وارد عمل می‌شود.
+- در نهایت، فایل به پوشه عمومی `Download/UndoDownloads` منتقل شده و از طریق `MediaStore` به گالری معرفی می‌شود.
+
+---
+
+### ۳. بهینه‌سازی حجم APK (ABI Splitting)
+
+به دلیل وجود باینری‌های سنگین برای معماری‌های مختلف، تنظیمات زیر در `build.gradle` اعمال شده است:
+- **arm64-v8a:** معماری هدف اصلی (۹۹٪ گوشی‌های مدرن).
+- حذف معماری‌های قدیمی یا شبیه‌ساز (`x86`, `x86_64`) برای کاهش حجم از ۳۸۰ مگابایت به **۴۰ مگابایت**.
+
+---
+
+### ۴. رفع محدودیت‌های YouTube
+
+برخلاف نسخه وب، نسخه اندروید از IP خود گوشی کاربر استفاده می‌کند که احتمال مسدود شدن توسط یوتیوب را کاهش می‌دهد. با این حال، در صورت بروز خطای "403 Forbidden":
+1. موتور دانلود باید از بخش تنظیمات بروزرسانی شود.
+2. پلاگین به صورت خودکار سعی می‌کند با پارامترهای `--no-check-certificates` و `--socket-timeout` اتصال را پایدار نگه دارد.
+
+---
+*آخرین بروزرسانی معماری: نوامبر ۲۰۲۶*

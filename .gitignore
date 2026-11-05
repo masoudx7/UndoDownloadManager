@@ -12,3 +12,19 @@ dist/
 # Native binaries
 android/app/src/main/assets/bin/*
 !android/app/src/main/assets/bin/.gitkeep
+
+# Capacitor Android build assets (synced from dist/)
+android/app/src/main/assets/public/*
+!android/app/src/main/assets/public/.gitkeep
+
+# Android Signing Keys
+*.jks
+*.keystore
+undodownloadmanager-release-key.jks
+release-key.jks
+
+# Temporary and Large Archives
+*.tar.xz
+*.tar.gz
+*.zip
+test.tar.xz
