@@ -17,6 +17,7 @@ import { storageService } from './services/storageService';
 import { downloadQueueManager } from './services/downloadQueueManager';
 import { networkService } from './services/networkService';
 import { SetupScreen } from './components/SetupScreen';
+import { PrivacyPolicyModal } from './components/PrivacyPolicyModal';
 import { binaryManager } from './services/binaryManagerService';
 
 export default function App() {
@@ -158,6 +159,7 @@ export default function App() {
   const [activeMainTab, setActiveMainTab] = useState<'active' | 'completed' | 'schedule'>('active');
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
   const [isCoinShopOpen, setIsCoinShopOpen] = useState<boolean>(false);
+  const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState<boolean>(false);
   const [undoNotification, setUndoNotification] = useState<UndoNotification | null>(null);
   const [isCurrentlyInScheduleWindow, setIsCurrentlyInScheduleWindow] = useState<boolean>(() => {
     return downloadQueueManager.isInsideScheduleWindow(storageService.getSchedule());
@@ -591,8 +593,14 @@ export default function App() {
 
       {/* Footer */}
       <footer className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 py-4 text-center text-xs text-slate-500 dark:text-slate-400 transition-colors duration-200 mb-16">
-        <div className="max-w-7xl mx-auto px-4 flex items-center justify-center">
+        <div className="max-w-7xl mx-auto px-4 flex flex-col items-center gap-1.5">
           <p>آندو دانلودر © 2026 - مدیر دانلود هوشمند، پرسرعت و چنداتصاله</p>
+          <button
+            onClick={() => setIsPrivacyModalOpen(true)}
+            className="text-indigo-600 dark:text-indigo-400 hover:underline transition-colors cursor-pointer"
+          >
+            سیاست حفظ حریم خصوصی
+          </button>
         </div>
       </footer>
 
@@ -667,6 +675,12 @@ export default function App() {
         notification={undoNotification}
         onUndo={handleUndo}
         onDismiss={() => setUndoNotification(null)}
+      />
+
+      {/* Privacy Policy Modal */}
+      <PrivacyPolicyModal
+        isOpen={isPrivacyModalOpen}
+        onClose={() => setIsPrivacyModalOpen(false)}
       />
 
     </div>
