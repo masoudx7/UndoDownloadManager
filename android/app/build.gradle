@@ -18,7 +18,7 @@ android {
         }
 
         manifestPlaceholders = [
-            marketApplicationId: "com.farsitel.bazaar", // شناسه استاندارد بازار
+            marketApplicationId: "com.farsitel.bazaar",
             marketBindAddress: "com.farsitel.bazaar",
             marketPermission: "com.farsitel.bazaar.permission.PAYMENT"
         ]
@@ -71,7 +71,6 @@ android {
             def keyAli = System.getenv("KEY_ALIAS")
             def keyPass = System.getenv("KEY_PASSWORD")
 
-            // Strict check: Only configure release signing if ALL credentials are provided via ENV
             if (keystorePath && storePass && keyAli && keyPass) {
                 def ksFile = file(keystorePath)
                 if (ksFile.exists()) {
@@ -95,11 +94,9 @@ android {
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             
-            // Apply release signing only if credentials were successfully loaded
             if (signingConfigs.release.storeFile != null) {
                 signingConfig signingConfigs.release
             } else {
-                // Fail release builds early if signing is requested but not configured
                 gradle.taskGraph.whenReady { taskGraph ->
                     if (taskGraph.hasTask(":app:assembleRelease") || taskGraph.hasTask(":app:bundleRelease")) {
                         throw new GradleException("🚨 PRODUCTION BUILD FAILED: Release signing credentials (KEYSTORE_PATH, etc.) are missing or invalid.")
@@ -121,16 +118,12 @@ android {
 
 configurations.all {
     resolutionStrategy {
-        force "androidx.core:core:${rootProject.ext.androidxCoreVersion ?: '1.17.0'}"
-        force "androidx.core:core-ktx:${rootProject.ext.androidxCoreVersion ?: '1.17.0'}"
-        force "androidx.activity:activity:${rootProject.ext.androidxActivityVersion ?: '1.11.0'}"
-        force "androidx.activity:activity-ktx:${rootProject.ext.androidxActivityVersion ?: '1.11.0'}"
-        force "androidx.appcompat:appcompat:$androidxAppCompatVersion"
-        force "androidx.fragment:fragment:$androidxFragmentVersion"
-        force "org.jetbrains.kotlin:kotlin-stdlib:$kotlinVersion"
-        force "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlinVersion"
-        force "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlinVersion"
-        force "org.jetbrains.kotlin:kotlin-reflect:$kotlinVersion"
+        force "androidx.core:core:1.17.0"
+        force "androidx.core:core-ktx:1.17.0"
+        force "androidx.activity:activity:1.11.0"
+        force "androidx.activity:activity-ktx:1.11.0"
+        force "androidx.appcompat:appcompat:1.7.0"
+        force "androidx.fragment:fragment:1.8.6"
     }
 }
 
@@ -142,25 +135,23 @@ repositories {
 
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
-    implementation "androidx.core:core:${rootProject.ext.androidxCoreVersion ?: '1.17.0'}"
-    implementation "androidx.core:core-ktx:${rootProject.ext.androidxCoreVersion ?: '1.17.0'}"
-    implementation "androidx.activity:activity:${rootProject.ext.androidxActivityVersion ?: '1.11.0'}"
-    implementation "androidx.activity:activity-ktx:${rootProject.ext.androidxActivityVersion ?: '1.11.0'}"
-    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
-    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
-    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation "androidx.core:core:1.17.0"
+    implementation "androidx.core:core-ktx:1.17.0"
+    implementation "androidx.activity:activity:1.11.0"
+    implementation "androidx.activity:activity-ktx:1.11.0"
+    implementation "androidx.appcompat:appcompat:1.7.0"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:1.2.0"
+    implementation "androidx.core:core-splashscreen:1.2.0-alpha02"
     implementation project(':capacitor-android')
     
-    // Kotlin Standard Library
-    implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlinVersion"
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:2.1.0"
 
-    // On-device Android yt-dlp & ffmpeg engine (Bionic libc & NDK)
     implementation 'io.github.junkfood02.youtubedl-android:library:0.18.1'
     implementation 'io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1'
 
-    testImplementation "junit:junit:$junitVersion"
-    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
-    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    testImplementation "junit:junit:4.13.2"
+    androidTestImplementation "androidx.test.ext:junit:1.2.1"
+    androidTestImplementation "androidx.test.espresso:espresso-core:3.6.1"
     
     implementation project(':capacitor-cordova-android-plugins')
 }

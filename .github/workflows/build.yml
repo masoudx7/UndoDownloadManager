@@ -11,42 +11,29 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout repository with existing android/ project preserved
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 2. Setup Java JDK 21 for modern Android Gradle builds
       - name: Setup Java JDK
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
 
-      # 3. Setup Bun runtime
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
-      # 4. Install Node dependencies
       - name: Install Dependencies
         run: bun install
 
-      # 5. Download Native Binaries into assets/bin before build
-      - name: Download Native Binaries
-        run: |
-          chmod +x scripts/download-binaries.sh || true
-          bun run download-binaries || true
-
-      # 6. Build Web Frontend (Vite)
       - name: Build Web Application
         run: bun run build
 
-      # 7. Sync Web Assets with Android Project (DO NOT delete android/ or re-add)
       - name: Sync Capacitor Android
         run: bunx cap sync android
 
-      # 8. Setup Keystore from Secret (Required for production release)
       - name: Setup Release Keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -55,10 +42,9 @@ jobs:
             echo "$KEYSTORE_BASE64" | base64 -d > android/app/release-key.jks
             echo "✅ Release Keystore decoded successfully."
           else
-            echo "⚠️ KEYSTORE_BASE64 secret is missing. Release build will be skipped or will fail."
+            echo "⚠️ KEYSTORE_BASE64 secret is missing. Skipping production signing setup."
           fi
 
-      # 9. Build Android APKs
       - name: Build Android APKs
         env:
           KEYSTORE_PATH: "release-key.jks"
@@ -72,23 +58,22 @@ jobs:
           echo "🔨 Building Debug APK..."
           ./gradlew :app:assembleDebug --stacktrace
           
-          # Only attempt release build if keystore secret was provided
-          if [ -f "app/release-key.jks" ]; then
+          if [ -f "app/release-key.jks" ] && [ -n "$KEYSTORE_PASSWORD" ]; then
             echo "🔨 Building Production Release APK..."
             ./gradlew :app:assembleRelease --stacktrace
           else
-            echo "⏩ Skipping Production Release APK (Keystore missing)."
+            echo "⏩ Skipping Production Release APK (Keystore or Secrets missing)."
           fi
           
           echo "🔍 Generated APKs:"
           find . -name "*.apk" -type f
 
-      # 10. Upload APKs as GitHub Actions Artifacts
       - name: Upload Android APKs
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: undo-download-manager-apks
           path: |
-            android/app/build/outputs/apk/**/*.apk
+            android/app/build/outputs/apk/debug/*.apk
+            android/app/build/outputs/apk/release/*.apk
           retention-days: 14
