@@ -283,11 +283,14 @@ public class YtDlpPlugin extends Plugin {
                     request.addOption("-f", formatId);
                 }
 
-                YoutubeDL.getInstance().execute(request, id, (progress, etaInSeconds, line) -> {
-                    long speedBytes = parseSpeedBytesPerSec(line);
-                    String speedStr = parseSpeedString(line);
-                    String etaStr = etaInSeconds > 0 ? (etaInSeconds + " ثانیه") : "";
-                    emitProgress(id, "downloading", progress, 0, 0, speedBytes, speedStr, etaStr, null, null);
+                YoutubeDL.getInstance().execute(request, id, new DownloadProgressCallback() {
+                    @Override
+                    public void onProgressUpdate(float progress, long etaInSeconds, String line) {
+                        long speedBytes = parseSpeedBytesPerSec(line);
+                        String speedStr = parseSpeedString(line);
+                        String etaStr = etaInSeconds > 0 ? (etaInSeconds + " ثانیه") : "";
+                        emitProgress(id, "downloading", progress, 0, 0, speedBytes, speedStr, etaStr, null, null);
+                    }
                 });
 
                 if (workOutputFile.exists()) {
