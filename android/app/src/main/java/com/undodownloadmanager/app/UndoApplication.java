@@ -87,8 +87,8 @@ public class UndoApplication extends Application {
 
                 if (isYoutubeDLInitialized) {
                     Log.i(TAG, "Starting silent background yt-dlp engine update check...");
-                    YoutubeDL.getInstance().updateYoutubeDL(appContext);
-                    Log.i(TAG, "Silent background engine update check completed successfully.");
+                    YoutubeDL.UpdateStatus status = YoutubeDL.getInstance().updateYoutubeDL(appContext, YoutubeDL.UpdateChannel.STABLE);
+                    Log.i(TAG, "Silent background engine update check completed with status: " + status);
                 }
             } catch (Throwable t) {
                 // Completely silent: ignore network/offline errors without interrupting the user
