@@ -1,6 +1,7 @@
 package com.undodownloadmanager.app;
 
 import android.app.Application;
+import android.content.Context;
 import android.util.Log;
 
 import com.yausername.ffmpeg.FFmpeg;
@@ -86,8 +87,8 @@ public class UndoApplication extends Application {
 
                 if (isYoutubeDLInitialized) {
                     Log.i(TAG, "Starting silent background yt-dlp engine update check...");
-                    YoutubeDL.UpdateStatus status = YoutubeDL.getInstance().updateYoutubeDL(appContext, YoutubeDL.UpdateChannel.STABLE);
-                    Log.i(TAG, "Silent background engine update check completed with status: " + status);
+                    YoutubeDL.getInstance().updateYoutubeDL(appContext);
+                    Log.i(TAG, "Silent background engine update check completed successfully.");
                 }
             } catch (Throwable t) {
                 // Completely silent: ignore network/offline errors without interrupting the user

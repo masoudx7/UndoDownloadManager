@@ -177,8 +177,8 @@ public class YtDlpPlugin extends Plugin {
                 Context appContext = context.getApplicationContext();
                 ensureEngineInitialized(appContext);
 
-                Log.i(TAG, "Updating YoutubeDL binary on device via STABLE channel...");
-                YoutubeDL.UpdateStatus status = YoutubeDL.getInstance().updateYoutubeDL(appContext, YoutubeDL.UpdateChannel.STABLE);
+                Log.i(TAG, "Updating YoutubeDL binary on device...");
+                YoutubeDL.getInstance().updateYoutubeDL(appContext);
 
                 UndoApplication.isYoutubeDLInitialized = true;
                 UndoApplication.lastError = null;
@@ -190,7 +190,7 @@ public class YtDlpPlugin extends Plugin {
 
                 JSObject ret = new JSObject();
                 ret.put("success", true);
-                ret.put("status", status != null ? status.name() : "DONE");
+                ret.put("status", "DONE");
                 ret.put("message", "موتور دانلود با موفقیت به آخرین نسخه پایدار بروزرسانی شد.");
                 ret.put("version", version);
                 call.resolve(ret);
