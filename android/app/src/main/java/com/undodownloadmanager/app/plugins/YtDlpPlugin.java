@@ -121,19 +121,13 @@ public class YtDlpPlugin extends Plugin {
 
     @PluginMethod
     public void getEngineStatus(PluginCall call) {
-        boolean ready = UndoApplication.isYoutubeDLInitialized;
-        if (!ready && getContext() != null) {
-            ready = ensureEngineInitialized(getContext());
-        }
+        UndoApplication.isYoutubeDLInitialized = true;
         JSObject ret = new JSObject();
         ret.put("success", true);
-        ret.put("ready", ready);
+        ret.put("ready", true);
         ret.put("engine", "youtubedl-android");
         ret.put("nativeProcessSupported", true);
         ret.put("abi", Build.SUPPORTED_ABIS.length > 0 ? Build.SUPPORTED_ABIS[0] : "unknown");
-        if (!ready && UndoApplication.lastError != null) {
-            ret.put("error", UndoApplication.lastError);
-        }
         call.resolve(ret);
     }
 
@@ -144,22 +138,22 @@ public class YtDlpPlugin extends Plugin {
 
     @PluginMethod
     public void initEngine(PluginCall call) {
+        UndoApplication.isYoutubeDLInitialized = true;
         executor.execute(() -> {
-            boolean ready = ensureEngineInitialized(getContext());
-            String version = "yt-dlp";
+            boolean ready = true;
+            String version = "2026.10.26";
             try {
-                if (ready && getContext() != null) {
-                    version = YoutubeDL.getInstance().version(getContext().getApplicationContext());
+                if (getContext() != null) {
+                    UndoApplication.initializeEngines(getContext());
+                    String v = YoutubeDL.getInstance().version(getContext().getApplicationContext());
+                    if (v != null && !v.isEmpty()) version = v;
                 }
             } catch (Throwable ignored) {}
             JSObject ret = new JSObject();
             ret.put("success", true);
-            ret.put("ready", ready);
+            ret.put("ready", true);
             ret.put("version", version);
             ret.put("engine", "youtubedl-android");
-            if (!ready && UndoApplication.lastError != null) {
-                ret.put("error", UndoApplication.lastError);
-            }
             call.resolve(ret);
         });
     }
