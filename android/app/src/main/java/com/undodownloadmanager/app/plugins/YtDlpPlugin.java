@@ -21,6 +21,7 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
+import com.undodownloadmanager.app.UndoApplication;
 import com.yausername.youtubedl_android.YoutubeDL;
 import com.yausername.youtubedl_android.YoutubeDLException;
 import com.yausername.youtubedl_android.YoutubeDLRequest;
@@ -64,9 +65,6 @@ public class YtDlpPlugin extends Plugin {
     private final Map<String, AtomicBoolean> activeHttpCancels = new ConcurrentHashMap<>();
     private NotificationManager notificationManager;
 
-    private final Object initLock = new Object();
-    private volatile boolean isEngineInitialized = false;
-
     @Override
     public void load() {
         super.load();
@@ -79,47 +77,11 @@ public class YtDlpPlugin extends Plugin {
     }
 
     private boolean ensureEngineInitialized(Context context) {
-        if (isEngineInitialized) return true;
-
-        synchronized (initLock) {
-            if (isEngineInitialized) return true;
-
-            try {
-                Context targetContext = context != null ? context : getContext();
-                if (targetContext == null) {
-                    Log.e(TAG, "Cannot initialize: context is null");
-                    return false;
-                }
-                Context appContext = targetContext.getApplicationContext();
-
-                Log.i(TAG, "Initializing on-device YoutubeDL engine (NDK & Bionic libc)...");
-                YoutubeDL.getInstance().init(appContext);
-
-                try {
-                    FFmpeg.getInstance().init(appContext);
-                    Log.i(TAG, "On-device FFmpeg library initialized.");
-                } catch (Throwable t) {
-                    Log.w(TAG, "FFmpeg init notice: " + t.getMessage());
-                }
-
-                isEngineInitialized = true;
-                Log.i(TAG, "=== ON-DEVICE YOUTUBEDL ENGINE INITIALIZED SUCCESSFULLY ===");
-                return true;
-            } catch (Throwable t) {
-                Log.e(TAG, "Error during YoutubeDL initialization: " + t.getMessage(), t);
-                try {
-                    Context appContext = context != null ? context.getApplicationContext() : (getContext() != null ? getContext().getApplicationContext() : null);
-                    if (appContext != null) {
-                        String version = YoutubeDL.getInstance().version(appContext);
-                        if (version != null && !version.isEmpty()) {
-                            isEngineInitialized = true;
-                            return true;
-                        }
-                    }
-                } catch (Throwable ignored) {}
-                return false;
-            }
+        if (UndoApplication.isYoutubeDLInitialized) {
+            return true;
         }
+        Context targetContext = context != null ? context : getContext();
+        return UndoApplication.initializeEngines(targetContext);
     }
 
     private void createNotificationChannel() {
@@ -159,7 +121,7 @@ public class YtDlpPlugin extends Plugin {
 
     @PluginMethod
     public void getEngineStatus(PluginCall call) {
-        boolean ready = isEngineInitialized;
+        boolean ready = UndoApplication.isYoutubeDLInitialized;
         if (!ready && getContext() != null) {
             ready = ensureEngineInitialized(getContext());
         }
@@ -169,7 +131,15 @@ public class YtDlpPlugin extends Plugin {
         ret.put("engine", "youtubedl-android");
         ret.put("nativeProcessSupported", true);
         ret.put("abi", Build.SUPPORTED_ABIS.length > 0 ? Build.SUPPORTED_ABIS[0] : "unknown");
+        if (!ready && UndoApplication.lastError != null) {
+            ret.put("error", UndoApplication.lastError);
+        }
         call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void ensureBinaries(PluginCall call) {
+        initEngine(call);
     }
 
     @PluginMethod
@@ -181,14 +151,68 @@ public class YtDlpPlugin extends Plugin {
                 if (ready && getContext() != null) {
                     version = YoutubeDL.getInstance().version(getContext().getApplicationContext());
                 }
-            } catch (Exception ignored) {}
+            } catch (Throwable ignored) {}
             JSObject ret = new JSObject();
             ret.put("success", true);
             ret.put("ready", ready);
             ret.put("version", version);
             ret.put("engine", "youtubedl-android");
+            if (!ready && UndoApplication.lastError != null) {
+                ret.put("error", UndoApplication.lastError);
+            }
             call.resolve(ret);
         });
+    }
+
+    @PluginMethod
+    public void updateEngine(PluginCall call) {
+        executor.execute(() -> {
+            Context context = getContext();
+            if (context == null) {
+                call.reject("کانتکست اپلیکیشن در دسترس نیست.");
+                return;
+            }
+
+            try {
+                Context appContext = context.getApplicationContext();
+                ensureEngineInitialized(appContext);
+
+                Log.i(TAG, "Updating YoutubeDL binary on device via STABLE channel...");
+                YoutubeDL.UpdateStatus status = YoutubeDL.getInstance().updateYoutubeDL(appContext, YoutubeDL.UpdateChannel.STABLE);
+
+                UndoApplication.isYoutubeDLInitialized = true;
+                UndoApplication.lastError = null;
+
+                String version = "yt-dlp";
+                try {
+                    version = YoutubeDL.getInstance().version(appContext);
+                } catch (Throwable ignored) {}
+
+                JSObject ret = new JSObject();
+                ret.put("success", true);
+                ret.put("status", status != null ? status.name() : "DONE");
+                ret.put("message", "موتور دانلود با موفقیت به آخرین نسخه پایدار بروزرسانی شد.");
+                ret.put("version", version);
+                call.resolve(ret);
+            } catch (Throwable t) {
+                Log.e(TAG, "updateEngine failed on device", t);
+                JSObject ret = new JSObject();
+                ret.put("success", false);
+                ret.put("error", "خطا در بروزرسانی موتور: " + (t.getMessage() != null ? t.getMessage() : t.toString()));
+                call.resolve(ret);
+            }
+        });
+    }
+
+    @PluginMethod
+    public void silentCheckEngineUpdate(PluginCall call) {
+        Context context = getContext();
+        if (context != null) {
+            UndoApplication.triggerSilentBackgroundEngineUpdate(context);
+        }
+        JSObject ret = new JSObject();
+        ret.put("started", true);
+        call.resolve(ret);
     }
 
     @PluginMethod
@@ -220,7 +244,8 @@ public class YtDlpPlugin extends Plugin {
                 }
 
                 if (!ensureEngineInitialized(getContext())) {
-                    call.reject("موتور دانلود در دستگاه هنوز آماده نشده است. لطفاً چند لحظه بعد مجدداً تلاش کنید.");
+                    String reason = UndoApplication.lastError != null ? (" (" + UndoApplication.lastError + ")") : "";
+                    call.reject("موتور دانلود در دستگاه هنوز آماده نشده است" + reason + ". لطفاً از بالای صفحه یا تب زمان‌بندی، دکمه «بروزرسانی موتور» را بزنید.");
                     return;
                 }
 
@@ -308,7 +333,8 @@ public class YtDlpPlugin extends Plugin {
         executor.execute(() -> {
             try {
                 if (!ensureEngineInitialized(getContext())) {
-                    call.reject("موتور دانلود در دستگاه هنوز آماده نشده است. لطفاً چند لحظه بعد مجدداً تلاش کنید.");
+                    String reason = UndoApplication.lastError != null ? (" (" + UndoApplication.lastError + ")") : "";
+                    call.reject("موتور دانلود در دستگاه هنوز آماده نشده است" + reason + ". لطفاً از بالای صفحه یا تب زمان‌بندی، دکمه «بروزرسانی موتور» را بزنید.");
                     return;
                 }
                 

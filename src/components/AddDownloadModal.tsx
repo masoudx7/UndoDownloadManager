@@ -90,13 +90,20 @@ export const AddDownloadModal: React.FC<AddDownloadModalProps> = ({
     try {
       if (navigator.clipboard && navigator.clipboard.readText) {
         const text = await navigator.clipboard.readText();
-        if (text && text.trim().startsWith('http')) {
+        if (text && text.trim()) {
           handleUrlChange(text.trim());
           extractMediaInfo(text.trim());
+          return;
         }
       }
     } catch (e) {
       console.warn('Clipboard read error:', e);
+    }
+    // Fallback prompt if clipboard API permission is blocked
+    const manual = window.prompt('لطفاً لینک کپی‌شده را در اینجا بچسبانید (Paste):');
+    if (manual && manual.trim()) {
+      handleUrlChange(manual.trim());
+      extractMediaInfo(manual.trim());
     }
   };
 

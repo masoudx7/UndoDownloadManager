@@ -33,6 +33,9 @@ export default function App() {
       }
     };
     checkBinariesOnStart();
+
+    // Silently check and update download engine in background without blocking user
+    ytDlpService.silentCheckAndUpdateEngine();
   }, []);
 
   const [darkMode, setDarkMode] = useState<boolean>(() => {
@@ -358,7 +361,7 @@ export default function App() {
   };
 
   const handleAddDownload = async (opts: AddDownloadOptions) => {
-    const quota = await storageService.consumeQuota();
+    const quota = await storageService.consumeQuota(opts.url);
     if (!quota.allowed) {
       setIsCoinShopOpen(true);
       return;

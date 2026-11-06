@@ -464,16 +464,36 @@ class StorageService {
 
   /**
    * Consume download quota:
-   * First check unlimited, then free quota, then coins.
-   * If free quota is consumed, decrement and verify with server so it cannot be bypassed.
+   * Checks if the URL has already been downloaded or added (duplicate check).
+   * If it's a duplicate download, quota consumption is bypassed (free).
+   * Otherwise: First check unlimited, then free quota, then coins.
    */
-  public async consumeQuota(): Promise<{
+  public async consumeQuota(url?: string): Promise<{
     allowed: boolean;
-    type?: 'unlimited' | 'free' | 'coin';
+    type?: 'unlimited' | 'free' | 'coin' | 'duplicate';
     remainingFree: number;
     remainingCoins: number;
     message?: string;
   }> {
+    // Check if this URL is already present in downloads (duplicate check)
+    if (url && url.trim()) {
+      const cleanUrl = url.trim().toLowerCase();
+      const existingDownloads = this.memoryCache.downloads || [];
+      const isDuplicate = existingDownloads.some((item) => {
+        const itemUrl = (item.url || '').trim().toLowerCase();
+        const itemDirect = (item.directUrl || '').trim().toLowerCase();
+        return (itemUrl && itemUrl === cleanUrl) || (itemDirect && itemDirect === cleanUrl);
+      });
+
+      if (isDuplicate) {
+        return {
+          allowed: true,
+          type: 'duplicate',
+          remainingFree: this.memoryCache.freeDownloads,
+          remainingCoins: this.memoryCache.purchasedCoins,
+        };
+      }
+    }
     if (this.isUnlimited()) {
       return {
         allowed: true,

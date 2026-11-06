@@ -101,6 +101,71 @@ class YtDlpService {
     };
   }
 
+  /**
+   * Updates the underlying download engine.
+   * On native Android, triggers on-device yt-dlp binary update via youtubedl-android.
+   * On web preview, invokes the local dev proxy /api/update-engine.
+   */
+  public async updateEngine(): Promise<{ success: boolean; message?: string; version?: string; error?: string }> {
+    if (this.isNative) {
+      const plugin = await this.getNativePlugin();
+      if (plugin?.updateEngine) {
+        try {
+          const res = await plugin.updateEngine();
+          if (res?.success) {
+            return {
+              success: true,
+              message: res.message || 'موتور دانلود با موفقیت به آخرین نسخه بروزرسانی شد.',
+              version: res.version,
+            };
+          }
+          return {
+            success: false,
+            error: res?.error || 'خطا در بروزرسانی موتور در دستگاه.',
+          };
+        } catch (e: any) {
+          return {
+            success: false,
+            error: e?.message || 'خطا در برقراری ارتباط با پلاگین بومی.',
+          };
+        }
+      }
+      return {
+        success: false,
+        error: 'پلاگین بومی روی این دستگاه در دسترس نیست.',
+      };
+    }
+
+    try {
+      const res = await fetch('/api/update-engine', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      return await res.json();
+    } catch (e: any) {
+      return {
+        success: false,
+        error: e?.message || 'خطا در ارتباط با سرور بروزرسانی.',
+      };
+    }
+  }
+
+  /**
+   * Silently triggers a background engine check & update on app startup.
+   * Runs transparently in the background without disturbing the user or displaying alerts.
+   */
+  public silentCheckAndUpdateEngine(): void {
+    if (this.isNative) {
+      this.getNativePlugin()
+        .then((plugin) => {
+          if (plugin?.silentCheckEngineUpdate) {
+            plugin.silentCheckEngineUpdate().catch(() => {});
+          }
+        })
+        .catch(() => {});
+    }
+  }
+
   private isDirectFile(url: string): boolean {
     if (!url) return false;
     const clean = url.toLowerCase().split('?')[0];

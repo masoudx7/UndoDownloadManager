@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ScheduleSettings } from '../types';
 import { Clock, PlayCircle, PauseCircle, FolderTree, CheckCircle2, Sparkles, RefreshCw, Zap } from 'lucide-react';
 import { initDownloadDirectories, CATEGORY_FOLDERS } from '../utils/capacitorStorageService';
+import { ytDlpService } from '../services/ytDlpService';
 
 interface SchedulePanelProps {
   schedule: ScheduleSettings;
@@ -48,15 +49,11 @@ export const SchedulePanel: React.FC<SchedulePanelProps> = ({
     setIsUpdatingEngine(true);
     setUpdateEngineResult(null);
     try {
-      const res = await fetch('/api/update-engine', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      const data = await res.json();
+      const data = await ytDlpService.updateEngine();
       if (data.success) {
         setUpdateEngineResult({
           success: true,
-          message: data.message,
+          message: data.message || 'موتور دانلود با موفقیت بروزرسانی شد',
           version: data.version,
         });
       } else {
@@ -68,7 +65,7 @@ export const SchedulePanel: React.FC<SchedulePanelProps> = ({
     } catch (err: any) {
       setUpdateEngineResult({
         success: false,
-        message: err.message || 'خطا در ارتباط با سرور بروزرسانی',
+        message: err.message || 'خطا در ارتباط با سرویس بروزرسانی',
       });
     } finally {
       setIsUpdatingEngine(false);

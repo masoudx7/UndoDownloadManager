@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Download, Moon, Sun, Plus, RefreshCw, Coins, Crown, Zap } from 'lucide-react';
+import { ytDlpService } from '../services/ytDlpService';
 
 interface HeaderProps {
   darkMode: boolean;
@@ -33,18 +34,14 @@ export const Header: React.FC<HeaderProps> = ({
   const handleUpdateEngine = async () => {
     setIsUpdating(true);
     try {
-      const res = await fetch('/api/update-engine', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      const data = await res.json();
+      const data = await ytDlpService.updateEngine();
       if (data.success) {
         alert(data.message + (data.version ? ` (${data.version})` : ''));
       } else {
         alert(data.error || 'خطا در بروزرسانی موتور دانلود');
       }
     } catch (err: any) {
-      alert(err.message || 'خطا در ارتباط با سرور');
+      alert(err.message || 'خطا در فرآیند بروزرسانی موتور');
     } finally {
       setIsUpdating(false);
     }
