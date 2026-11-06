@@ -122,6 +122,7 @@ class YtDlpService {
       const plugin = await this.getNativePlugin();
       if (plugin) {
         try {
+          await this.ensureEngineReady().catch(() => {});
           const res = await plugin.extractInfo({ url: cleanUrl });
           if (res && res.mediaInfo) {
             return res.mediaInfo;
@@ -349,6 +350,9 @@ class YtDlpService {
   private formatErrorMessage(error: string): string {
     if (!error) return 'خطای نامشخص در عملیات دانلود.';
 
+    if (error.includes('instance not initialized')) {
+      return 'موتور دانلود در حال آماده‌سازی اولیه است. لطفاً چند لحظه بعد مجدداً امتحان کنید.';
+    }
     if (error.includes('Video unavailable') || error.includes('Private video')) {
       return 'این ویدیو در دسترس نیست یا خصوصی است.';
     }

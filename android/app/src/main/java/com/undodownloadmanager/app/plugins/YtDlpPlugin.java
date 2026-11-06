@@ -64,8 +64,8 @@ public class YtDlpPlugin extends Plugin {
     private final Map<String, AtomicBoolean> activeHttpCancels = new ConcurrentHashMap<>();
     private NotificationManager notificationManager;
 
+    private final Object initLock = new Object();
     private volatile boolean isEngineInitialized = false;
-    private volatile boolean isInitializing = false;
 
     @Override
     public void load() {
@@ -74,31 +74,51 @@ public class YtDlpPlugin extends Plugin {
         if (context != null) {
             notificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
             createNotificationChannel();
-            executor.execute(() -> initYoutubeDLEngine(context));
+            executor.execute(() -> ensureEngineInitialized(context));
         }
     }
 
-    private synchronized boolean initYoutubeDLEngine(Context context) {
+    private boolean ensureEngineInitialized(Context context) {
         if (isEngineInitialized) return true;
-        if (isInitializing) return false;
-        isInitializing = true;
 
-        try {
-            Log.i(TAG, "Initializing on-device engine...");
-            Context appContext = context.getApplicationContext();
-            YoutubeDL.getInstance().init(appContext);
+        synchronized (initLock) {
+            if (isEngineInitialized) return true;
+
             try {
-                FFmpeg.getInstance().init(appContext);
+                Context targetContext = context != null ? context : getContext();
+                if (targetContext == null) {
+                    Log.e(TAG, "Cannot initialize: context is null");
+                    return false;
+                }
+                Context appContext = targetContext.getApplicationContext();
+
+                Log.i(TAG, "Initializing on-device YoutubeDL engine (NDK & Bionic libc)...");
+                YoutubeDL.getInstance().init(appContext);
+
+                try {
+                    FFmpeg.getInstance().init(appContext);
+                    Log.i(TAG, "On-device FFmpeg library initialized.");
+                } catch (Throwable t) {
+                    Log.w(TAG, "FFmpeg init notice: " + t.getMessage());
+                }
+
+                isEngineInitialized = true;
+                Log.i(TAG, "=== ON-DEVICE YOUTUBEDL ENGINE INITIALIZED SUCCESSFULLY ===");
+                return true;
             } catch (Throwable t) {
-                Log.w(TAG, "FFmpeg init warning: " + t.getMessage());
+                Log.e(TAG, "Error during YoutubeDL initialization: " + t.getMessage(), t);
+                try {
+                    Context appContext = context != null ? context.getApplicationContext() : (getContext() != null ? getContext().getApplicationContext() : null);
+                    if (appContext != null) {
+                        String version = YoutubeDL.getInstance().version(appContext);
+                        if (version != null && !version.isEmpty()) {
+                            isEngineInitialized = true;
+                            return true;
+                        }
+                    }
+                } catch (Throwable ignored) {}
+                return false;
             }
-            isEngineInitialized = true;
-            return true;
-        } catch (Throwable t) {
-            Log.e(TAG, "Failed to initialize engine", t);
-            return false;
-        } finally {
-            isInitializing = false;
         }
     }
 
@@ -139,9 +159,13 @@ public class YtDlpPlugin extends Plugin {
 
     @PluginMethod
     public void getEngineStatus(PluginCall call) {
+        boolean ready = isEngineInitialized;
+        if (!ready && getContext() != null) {
+            ready = ensureEngineInitialized(getContext());
+        }
         JSObject ret = new JSObject();
         ret.put("success", true);
-        ret.put("ready", isEngineInitialized);
+        ret.put("ready", ready);
         ret.put("engine", "youtubedl-android");
         ret.put("nativeProcessSupported", true);
         ret.put("abi", Build.SUPPORTED_ABIS.length > 0 ? Build.SUPPORTED_ABIS[0] : "unknown");
@@ -151,10 +175,18 @@ public class YtDlpPlugin extends Plugin {
     @PluginMethod
     public void initEngine(PluginCall call) {
         executor.execute(() -> {
-            boolean ready = initYoutubeDLEngine(getContext());
+            boolean ready = ensureEngineInitialized(getContext());
+            String version = "yt-dlp";
+            try {
+                if (ready && getContext() != null) {
+                    version = YoutubeDL.getInstance().version(getContext().getApplicationContext());
+                }
+            } catch (Exception ignored) {}
             JSObject ret = new JSObject();
             ret.put("success", true);
             ret.put("ready", ready);
+            ret.put("version", version);
+            ret.put("engine", "youtubedl-android");
             call.resolve(ret);
         });
     }
@@ -187,9 +219,8 @@ public class YtDlpPlugin extends Plugin {
                     return;
                 }
 
-                if (!isEngineInitialized) initYoutubeDLEngine(getContext());
-                if (!isEngineInitialized) {
-                    call.reject("موتور دانلود آماده نشد.");
+                if (!ensureEngineInitialized(getContext())) {
+                    call.reject("موتور دانلود در دستگاه هنوز آماده نشده است. لطفاً چند لحظه بعد مجدداً تلاش کنید.");
                     return;
                 }
 
@@ -234,6 +265,9 @@ public class YtDlpPlugin extends Plugin {
 
     private String formatPersianError(String rawError) {
         if (rawError == null || rawError.isEmpty()) return "خطای نامشخص در پردازش دانلود.";
+        if (rawError.contains("instance not initialized")) {
+            return "موتور دانلود در حال آماده‌سازی اولیه است. لطفاً چند لحظه بعد مجدداً تلاش کنید.";
+        }
         if (rawError.contains("Video unavailable") || rawError.contains("Private video")) return "این ویدیو خصوصی است یا توسط ناشر حذف شده است.";
         if (rawError.contains("Sign in to confirm you’re not a bot") || rawError.contains("Sign in")) return "این ویدیو نیازمند تأیید هویت است یا توسط پلتفرم محدود شده است.";
         if (rawError.contains("HTTP Error 403") || rawError.contains("Forbidden")) return "دسترسی به لینک دانلود مسدود است (خطای ۴۰۳).";
@@ -273,7 +307,10 @@ public class YtDlpPlugin extends Plugin {
     private void downloadWithYoutubeDL(String id, String url, String formatId, boolean audioOnly, String displayName, File workOutputFile, PluginCall call) {
         executor.execute(() -> {
             try {
-                if (!isEngineInitialized) initYoutubeDLEngine(getContext());
+                if (!ensureEngineInitialized(getContext())) {
+                    call.reject("موتور دانلود در دستگاه هنوز آماده نشده است. لطفاً چند لحظه بعد مجدداً تلاش کنید.");
+                    return;
+                }
                 
                 YoutubeDLRequest request = new YoutubeDLRequest(url);
                 request.addOption("-o", workOutputFile.getAbsolutePath());

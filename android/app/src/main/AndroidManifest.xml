@@ -3,6 +3,7 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <application
+        android:name=".UndoApplication"
         android:allowBackup="true"
         android:extractNativeLibs="true"
         tools:replace="android:extractNativeLibs"
