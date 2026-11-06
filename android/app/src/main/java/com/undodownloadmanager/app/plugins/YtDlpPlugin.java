@@ -25,10 +25,12 @@ import com.yausername.youtubedl_android.YoutubeDL;
 import com.yausername.youtubedl_android.YoutubeDLException;
 import com.yausername.youtubedl_android.YoutubeDLRequest;
 import com.yausername.youtubedl_android.YoutubeDLResponse;
-import com.yausername.youtubedl_android.DownloadProgressCallback;
 import com.yausername.youtubedl_android.mapper.VideoFormat;
 import com.yausername.youtubedl_android.mapper.VideoInfo;
 import com.yausername.ffmpeg.FFmpeg;
+
+import kotlin.Unit;
+import kotlin.jvm.functions.Function3;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -283,13 +285,14 @@ public class YtDlpPlugin extends Plugin {
                     request.addOption("-f", formatId);
                 }
 
-                YoutubeDL.getInstance().execute(request, id, new DownloadProgressCallback() {
+                YoutubeDL.getInstance().execute(request, id, new Function3<Float, Long, String, Unit>() {
                     @Override
-                    public void onProgressUpdate(float progress, long etaInSeconds, String line) {
+                    public Unit invoke(Float progress, Long etaInSeconds, String line) {
                         long speedBytes = parseSpeedBytesPerSec(line);
                         String speedStr = parseSpeedString(line);
                         String etaStr = etaInSeconds > 0 ? (etaInSeconds + " ثانیه") : "";
                         emitProgress(id, "downloading", progress, 0, 0, speedBytes, speedStr, etaStr, null, null);
+                        return Unit.INSTANCE;
                     }
                 });
 
