@@ -177,8 +177,8 @@ public class YtDlpPlugin extends Plugin {
                 Context appContext = context.getApplicationContext();
                 ensureEngineInitialized(appContext);
 
-                Log.i(TAG, "Updating YoutubeDL binary on device via STABLE channel...");
-                YoutubeDL.UpdateStatus status = YoutubeDL.getInstance().updateYoutubeDL(appContext, YoutubeDL.UpdateChannel.STABLE);
+                Log.i(TAG, "Updating YoutubeDL binary on device via _STABLE channel...");
+                YoutubeDL.UpdateStatus status = YoutubeDL.getInstance().updateYoutubeDL(appContext, YoutubeDL.UpdateChannel._STABLE);
 
                 UndoApplication.isYoutubeDLInitialized = true;
                 UndoApplication.lastError = null;
