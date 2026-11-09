@@ -45,7 +45,7 @@ jobs:
             echo "⚠️ KEYSTORE_BASE64 secret is missing. Skipping production signing setup."
           fi
 
-      - name: Build Android Release APK
+      - name: Build Android APKs
         env:
           KEYSTORE_PATH: "release-key.jks"
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -55,22 +55,25 @@ jobs:
           cd android
           chmod +x gradlew
           
+          echo "🔨 Building Debug APK..."
+          ./gradlew :app:assembleDebug --stacktrace
+          
           if [ -f "app/release-key.jks" ] && [ -n "$KEYSTORE_PASSWORD" ]; then
             echo "🔨 Building Production Release APK..."
             ./gradlew :app:assembleRelease --stacktrace
           else
-            echo "🚨 Release signing credentials missing. Production release build requires KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, and KEY_PASSWORD secrets."
-            exit 1
+            echo "⏩ Skipping Production Release APK (Keystore or Secrets missing)."
           fi
           
           echo "🔍 Generated APKs:"
           find . -name "*.apk" -type f
 
-      - name: Upload Android Release APK
+      - name: Upload Android APKs
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: undo-download-manager-release-apk
+          name: undo-download-manager-apks
           path: |
+            android/app/build/outputs/apk/debug/*.apk
             android/app/build/outputs/apk/release/*.apk
           retention-days: 14

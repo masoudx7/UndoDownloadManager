@@ -7,27 +7,19 @@
 }
 -keep class com.getcapacitor.** { *; }
 
-# Application and Plugin classes
--keep class com.undodownloadmanager.app.UndoApplication { *; }
--keep class com.undodownloadmanager.app.MainActivity { *; }
--keep class com.undodownloadmanager.app.plugins.YtDlpPlugin { *; }
-
 # youtubedl-android and FFmpeg library rules
--keep class com.yausername.** { *; }
--keep interface com.yausername.** { *; }
--keep class io.github.junkfood02.** { *; }
--keep interface io.github.junkfood02.** { *; }
--dontwarn com.yausername.**
--dontwarn io.github.junkfood02.**
+# These rely on JNI and reflection for mapping JSON to objects
+-keep class com.yausername.youtubedl_android.** { *; }
+-keep class com.yausername.ffmpeg.** { *; }
 
 # Ensure native methods are not renamed or removed
 -keepclasseswithmembernames class * {
     native <methods>;
 }
--keepclassmembers class * {
-    native <methods>;
-}
 
-# Keep line numbers and annotations for debugging and reflection
--keepattributes SourceFile,LineNumberTable,*Annotation*,Signature,EnclosingMethod
+# Preserve the specific plugin class
+-keep class com.undodownloadmanager.app.plugins.YtDlpPlugin { *; }
+
+# Keep line numbers for better crash reporting in production
+-keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
