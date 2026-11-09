@@ -86,7 +86,39 @@ public class YtDlpPlugin extends Plugin {
         try {
             Log.i(TAG, "Initializing on-device engine...");
             Context appContext = context.getApplicationContext();
+
+            // Self-healing: if an old corrupted extraction exists missing libandroid-support.so, clean it
+            try {
+                File baseDir = new File(appContext.getNoBackupFilesDir(), "youtubedl-android");
+                File pythonDir = new File(baseDir, "packages/python");
+                File supportLib = new File(pythonDir, "usr/lib/libandroid-support.so");
+                if (pythonDir.exists() && (!supportLib.exists() || supportLib.length() == 0)) {
+                    Log.w(TAG, "Incomplete python installation detected. Cleaning up for re-extraction...");
+                    deleteRecursively(pythonDir);
+                    appContext.getSharedPreferences("youtubedl-android", Context.MODE_PRIVATE)
+                            .edit().remove("pythonLibVersion").apply();
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "Pre-init cleanup warning: " + t.getMessage());
+            }
+
             YoutubeDL.getInstance().init(appContext);
+
+            // Double check: if libandroid-support.so exists in nativeLibraryDir, ensure it also exists in python/usr/lib/
+            try {
+                File baseDir = new File(appContext.getNoBackupFilesDir(), "youtubedl-android");
+                File pythonDir = new File(baseDir, "packages/python");
+                File supportLib = new File(pythonDir, "usr/lib/libandroid-support.so");
+                File nativeLib = new File(appContext.getApplicationInfo().nativeLibraryDir, "libandroid-support.so");
+                if (nativeLib.exists() && (!supportLib.exists() || supportLib.length() == 0)) {
+                    if (supportLib.getParentFile() != null) supportLib.getParentFile().mkdirs();
+                    copySimpleFile(nativeLib, supportLib);
+                    Log.i(TAG, "Synchronized libandroid-support.so from nativeLibraryDir to " + supportLib.getAbsolutePath());
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "Post-init lib sync warning: " + t.getMessage());
+            }
+
             try {
                 FFmpeg.getInstance().init(appContext);
             } catch (Throwable t) {
@@ -99,6 +131,31 @@ public class YtDlpPlugin extends Plugin {
             return false;
         } finally {
             isInitializing = false;
+        }
+    }
+
+    private void deleteRecursively(File fileOrDir) {
+        if (fileOrDir == null || !fileOrDir.exists()) return;
+        if (fileOrDir.isDirectory()) {
+            File[] children = fileOrDir.listFiles();
+            if (children != null) {
+                for (File child : children) {
+                    deleteRecursively(child);
+                }
+            }
+        }
+        fileOrDir.delete();
+    }
+
+    private void copySimpleFile(File src, File dst) {
+        try (InputStream in = new FileInputStream(src); OutputStream out = new FileOutputStream(dst)) {
+            byte[] buf = new byte[8192];
+            int len;
+            while ((len = in.read(buf)) > 0) {
+                out.write(buf, 0, len);
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "copySimpleFile failed: " + t.getMessage());
         }
     }
 
